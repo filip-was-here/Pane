@@ -457,6 +457,7 @@
         "panes adopt",
         "panes archive",
         "panes handoff",
+        "panes receive",
         "panes pin",
         "panes unpin",
         "panes rename",
@@ -564,6 +565,9 @@
           "$ref": "#/$defs/helpLines"
         },
         "panes handoff": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "panes receive": {
           "$ref": "#/$defs/helpLines"
         },
         "panes pin": {

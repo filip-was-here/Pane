@@ -32,6 +32,7 @@ import {
   runPanesArchive,
   runPanesAdopt,
   runPanesHandoff,
+  runPanesReceive,
   runPanesCreate,
   runPanesCost,
   runPanesList,
@@ -226,6 +227,10 @@ async function dispatchParsedCommand(parsed: ParsedArgs, telemetryContext: Wrapp
 
   if (parsed.command === 'panes handoff') {
     return runPanesHandoff(parsed);
+  }
+
+  if (parsed.command === 'panes receive') {
+    return runPanesReceive(parsed);
   }
 
   if (parsed.command === 'panes pin') {
