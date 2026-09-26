@@ -1,3 +1,4 @@
+import { cliAgentSchema, type CliAgentType } from '../../../shared/types/cli-agent';
 /**
  * Session management for Pane.
  * Note: "Sessions" are called "Panes" in the UI. Internally they remain
@@ -97,7 +98,7 @@ function getMessageContent(message: GenericMessageData['message']): string | Mes
 const terminalResumeStateSchema = boundary.object({
   wasInterrupted: boundary.optional(boundary.boolean),
   initialCommand: boundary.optional(boundary.string),
-  agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+  agentType: boundary.optional(cliAgentSchema),
   agentSessionId: boundary.optional(boundary.string),
   hasClaudeSessionId: boundary.optional(boundary.boolean),
 });
@@ -105,7 +106,7 @@ const terminalResumeStateSchema = boundary.object({
 function parseTerminalResumeState(value: ToolPanelState['customState']): {
   wasInterrupted?: boolean;
   initialCommand?: string;
-  agentType?: 'claude' | 'codex' | 'cursor';
+  agentType?: CliAgentType;
   agentSessionId?: string;
   hasClaudeSessionId?: boolean;
 } | undefined {
