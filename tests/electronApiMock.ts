@@ -350,6 +350,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onWindowFocusChanged') {
           return (callback: MockEventCallback) => subscribe('window:focus-changed', callback);
         }
+        if (prop === 'onProjectUpdated') {
+          return (callback: MockEventCallback) => subscribe('project:updated', callback);
+        }
         if (prop === 'onSessionUpdated') {
           return (callback: MockEventCallback) => subscribe('session:updated', callback);
         }
@@ -1150,6 +1153,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         getTerminalAckedBytes() {
           return terminalAckedBytes;
+        },
+        emitProjectUpdated(project: JsonObject) {
+          emit('project:updated', clone(project));
         },
         emitSessionUpdated(session: JsonObject) {
           emit('session:updated', clone(session));
