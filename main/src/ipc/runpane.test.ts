@@ -16,6 +16,7 @@ import type { Session } from '../types/session';
 import type { AppServices } from './types';
 import type { CreatePanelRequest, TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import type { RunpaneToolSpec } from '../../../shared/types/runpaneOrchestration';
+import type { OrchestrationSessionCreateInput } from '../../../shared/types/orchestrationSession';
 
 import { RUNPANE_CONTRACT } from '../../../shared/types/generatedRunpaneContract';
 import { panelManager } from '../services/panelManager';
@@ -361,6 +362,20 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.isTerminalInitialized).mockReturnValue(true);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(null);
     vi.mocked(terminalPanelManager.getCleanTerminalScrollback).mockResolvedValue(null);
+  });
+
+  it('preserves the requested Session pin through daemon create decoding', async () => {
+    const create = vi.fn(async (input: OrchestrationSessionCreateInput) => ({
+      session: { id: 'coordinator', name: input.name, isPinned: input.isPinned ?? false },
+      panel: { id: 'coordinator-panel' },
+      internalSession: { id: 'coordinator-owner' },
+    }));
+    // SAFETY: This command only reaches create; the stub reports its decoded input as a Session result.
+    const registry = createRegistry(createServices({ orchestrationSessionManager: { create } as never }));
+    const result = await registry.invoke('runpane:sessions:create', [{ name: 'Coordinator', isPinned: true }]);
+    expect(result).toMatchObject({ ok: true, session: { isPinned: true } });
+    await expect(registry.invoke('runpane:sessions:create', [{ name: 'Invalid', isPinned: 'true' }]))
+      .rejects.toThrow('expected boolean');
   });
 
   describe('runpane:panes:adopt', () => {

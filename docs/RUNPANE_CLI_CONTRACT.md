@@ -122,6 +122,8 @@ runpane sessions list [--json] [--pane-dir <path>]
 runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]
 runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
 runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
@@ -139,8 +141,6 @@ runpane links create --pane <pane-id> --json
 runpane panes git-status --pane <pane-id> --json
 runpane help
 runpane <command> --help
-runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
-runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 ```
 
 `runpane` with no arguments and `runpane setup` open an interactive wizard when stdin and stdout are TTYs. The remote-host wizard asks only for a name, then runs interactive Tailscale setup with automatic port selection; explicit install daemon flags remain available for SSH and manual URLs. In non-interactive shells or CI, both forms must print help, common commands, and agent discovery hints, then exit successfully instead of waiting for input.
@@ -215,6 +215,8 @@ A watch releases its pending slot when its client socket or named pipe disconnec
 
 `sessions update` update a Session overview from structured JSON.
 
+`sessions pin` and `sessions unpin` set the Session pin star through the existing UI update path. Create JSON accepts `isPinned` (default false); update JSON preserves the pin when the field is omitted.
+
 `sessions set-agent` switch the durable terminal agent for a named Session.
 
 `sessions associate` associate a user-visible Pane with a named Session.
@@ -238,10 +240,6 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 `runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.
 
 `runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel.
-
-`sessions pin` declaratively pins a Session using the same pin state as the UI.
-
-`sessions unpin` declaratively unpins a Session using the same pin state as the UI.
 
 ## Command reference
 
@@ -464,8 +462,6 @@ Brief tools:
 - `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `watch`: Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.
-- `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
-- `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
 
 Managed AGENTS.md block body:
 

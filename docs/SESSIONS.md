@@ -136,7 +136,10 @@ automatically; use an explicit resume command if you know their ID.
 
 Pinned is the first sidebar category and can contain both Session chats and
 Panes. Right-click a Session to pin or unpin it. The pin preference survives
-restarts; an archived Session stays out of Pinned until it is restored.
+restarts; an archived Session stays out of Pinned until it is restored. RunPane
+can set the same preference with `sessions pin` or `sessions unpin --session
+<id|name>`. Create JSON accepts `isPinned` (default false), and update JSON
+accepts it without changing the preference when omitted.
 
 Click a Session row to open its chat and expand or collapse its associated
 Panes. Child Pane rows are indented beyond the Session chat icon and keep the
@@ -264,6 +267,8 @@ runpane sessions get --session <session-id-or-name> --json
 runpane sessions overview --session <session-id-or-name> --json
 runpane sessions create --from-json <path|-> --json
 runpane sessions update --session <session-id-or-name> --from-json <path|-> --json
+runpane sessions pin --session <session-id-or-name> --json
+runpane sessions unpin --session <session-id-or-name> --json
 runpane sessions set-agent --session <session-id-or-name> --agent <agent> --json
 runpane sessions associate --session <session-id-or-name> --pane <pane-id> --json
 runpane sessions detach --session <session-id-or-name> --pane <pane-id> --json
@@ -602,8 +607,8 @@ Earlier development builds had an experimental progress view that rendered
 `.pane-progress.json` switch and leaves any HTML files in place.
 
 New worktrees launched from a Session default to unpinned. First association also
-clears a worktree's previous pin so it appears as a Session child. You can pin it
-manually afterward; repeated association does not undo that choice. Independent
+clears a worktree's previous pin, including an explicit `--pinned` creation pin,
+so it appears as a Session child. Use `panes pin` manually afterward; repeated association does not undo that choice. Independent
 worktree defaults and existing historical pins are unchanged.
 
 ### Generated instructions and Git

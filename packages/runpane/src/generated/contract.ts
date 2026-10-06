@@ -1935,6 +1935,8 @@ export const RUNPANE_CONTRACT = {
         "  runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
         "  runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+        "  runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
+        "  runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
         "  runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
         "  runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
         "  runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
@@ -2600,7 +2602,8 @@ export const RUNPANE_CONTRACT = {
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
         "  --json                       Print JSON output.",
         "",
-        "JSON isPinned: true pins the Session; omitted or false leaves it unpinned."
+        "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
+        "Create-time isPinned requires an updated Pane app; on older apps, use sessions pin after creation and read back the result."
       ],
       "sessions get": [
         "Usage:",
@@ -3802,7 +3805,8 @@ export const RUNPANE_CONTRACT = {
         "  --agent <codex|claude|cursor>  Agent terminal to use.",
         "  --json                       Print JSON output.",
         "",
-        "JSON isPinned: true pins the Session; omitted or false leaves it unpinned."
+        "JSON isPinned: true pins the Session; omitted or false leaves it unpinned.",
+        "Create-time isPinned requires an updated Pane app; on older apps, use sessions pin after creation and read back the result."
       ],
       "sessions get": [
         "Usage:",
@@ -4374,6 +4378,8 @@ export const RUNPANE_CONTRACT = {
       "runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]",
       "runpane sessions get --session <id|name> [--json] [--pane-dir <path>]",
       "runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]",
+      "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
+      "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]",
       "runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]",
       "runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]",
       "runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]",
@@ -4390,9 +4396,7 @@ export const RUNPANE_CONTRACT = {
       "runpane links create --pane <pane-id> --json",
       "runpane panes git-status --pane <pane-id> --json",
       "runpane help",
-      "runpane <command> --help",
-      "runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]",
-      "runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]"
+      "runpane <command> --help"
     ],
     "commandDescriptions": [
       "`runpane` with no arguments and `runpane setup` open an interactive wizard when stdin and stdout are TTYs. The remote-host wizard asks only for a name, then runs interactive Tailscale setup with automatic port selection; explicit install daemon flags remain available for SSH and manual URLs. In non-interactive shells or CI, both forms must print help, common commands, and agent discovery hints, then exit successfully instead of waiting for input.",
@@ -4431,6 +4435,7 @@ export const RUNPANE_CONTRACT = {
       "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
       "`sessions get` read one durable named orchestration Session.",
       "`sessions update` update a Session overview from structured JSON.",
+      "`sessions pin` and `sessions unpin` set the Session pin star through the existing UI update path. Create JSON accepts `isPinned` (default false); update JSON preserves the pin when the field is omitted.",
       "`sessions set-agent` switch the durable terminal agent for a named Session.",
       "`sessions associate` associate a user-visible Pane with a named Session.",
       "`sessions detach` detach a Pane from a named Session.",
@@ -4442,9 +4447,7 @@ export const RUNPANE_CONTRACT = {
       "Commands with a contract `daemonAction` (the `panes` git, script, restore, and move commands, `folders list|create`, and `links open`) call the same Pane daemon channel as the matching button in the app and print `{ ok, data, error }`. Destructive ones add a pane:// `link` to review the Pane.",
       "`runpane links create` builds `pane://open?...` links; opening one in Pane selects what it names and never changes Pane state.",
       "`runpane docs search|read` search and read Pane docs, help, and installed Pane Chat skills offline. They ship in the npm package and the Pane app only.",
-      "`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel.",
-      "`sessions pin` declaratively pins a Session using the same pin state as the UI.",
-      "`sessions unpin` declaratively unpins a Session using the same pin state as the UI."
+      "`runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff \"claude opus on parsas-macbook-pro\" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. The receiver reports back to the sender's panel."
     ],
     "wrapperFlagNote": "The top-level `runpane --version` form prints the wrapper version. The install subcommand form `runpane install --version vX.Y.Z` selects a Pane release.",
     "localControlFlagNote": "`runpane doctor --json`, `runpane repos list`, `runpane panes ...`, and `runpane panels ...` commands use or describe the local framed daemon socket/pipe for a running Pane app. `--pane-dir` points the wrapper at a non-default Pane data directory, such as `PANE_DIR=~/.pane_test` in development. `runpane agent-context` is local/offline and can be used before Pane is running. `agent-context` and `version` accept and ignore `--pane-dir`, so one `--pane-dir` can be passed to every runpane command. In a Pane repository checkout, if `runpane` is not on PATH, build the local wrapper with `pnpm --filter runpane build` and run it with Node 22 or newer, for example `node packages/runpane/dist/cli.js doctor --json`. From WSL, if the user runs Windows Pane, call the Windows wrapper through `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane ...'` so the command can reach the Windows named-pipe daemon and avoid UNC cwd issues.",
@@ -10140,24 +10143,6 @@ export const RUNPANE_CONTRACT = {
             "--idle-backoff",
             "--json"
           ]
-        },
-        {
-          "name": "sessions unpin",
-          "summary": "Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.",
-          "arguments": [
-            "--session <id|name>",
-            "--json",
-            "--pane-dir <path>"
-          ]
-        },
-        {
-          "name": "sessions pin",
-          "summary": "Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.",
-          "arguments": [
-            "--session <id|name>",
-            "--json",
-            "--pane-dir <path>"
-          ]
         }
       ]
     },
@@ -13265,7 +13250,8 @@ export const RUNPANE_CONTRACT = {
         ],
         "notes": [
           "Structured input accepts launchCommand (full command including arguments; empty uses the selected agent default) and profile (Session behavior instructions). Creating/opening a Session submits no automatic prompt. Changes apply on next terminal launch.",
-          "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted."
+          "JSON isPinned: true/false sets the UI pin star. Creation defaults to false; update preserves the pin when omitted.",
+          "Create-time isPinned requires an updated Pane app. Older apps may ignore the field; use sessions pin after creation and read back the result."
         ]
       },
       "sessions get": {
