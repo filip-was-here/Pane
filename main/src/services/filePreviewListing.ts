@@ -3,7 +3,7 @@ import { createWriteStream } from 'fs';
 import { tmpdir } from 'os';
 import { extname, join } from 'path';
 import { pipeline } from 'stream/promises';
-import Database from 'better-sqlite3-multiple-ciphers';
+import { inspectSqliteSnapshot } from './sqlitePreview';
 import type { FilePreviewListing } from '../../../shared/types/filePreview';
 
 const MAX_ENTRIES = 1000;
@@ -78,20 +78,22 @@ export async function listArchive(filePath: string): Promise<FilePreviewListing>
 }
 
 /** Inspect a bounded temporary snapshot so SQLite can never create source sidecars. */
-export async function listSqlite(filePath: string): Promise<FilePreviewListing> {
+export async function listSqlite(filePath: string, deadlineMs = 3000): Promise<FilePreviewListing> {
   const source = await open(filePath, 'r');
   let directory: string | undefined;
   try {
     const before = await source.stat();
     if (!before.isFile() || before.size > 32 * 1024 * 1024) throw new Error('SQLite preview is limited to 32 MiB.');
-    const checkWal = async () => {
-      const wal = await stat(`${filePath}-wal`).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') throw error;
-        return null;
-      });
-      if (wal?.size) throw new Error('Cannot preview a database with an active WAL. Open a closed database copy.');
+    const checkRecoveryFiles = async () => {
+      for (const [suffix, label] of [['-wal', 'active WAL'], ['-journal', 'rollback journal']]) {
+        const sidecar = await stat(`${filePath}${suffix}`).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error;
+          return null;
+        });
+        if (sidecar?.size) throw new Error(`Cannot preview a database with a nonempty ${label}. Open a closed database copy.`);
+      }
     };
-    await checkWal();
+    await checkRecoveryFiles();
     const signature = Buffer.alloc(16);
     await source.read(signature, 0, 16, 0);
     if (signature.toString('utf8') !== 'SQLite format 3\0') throw new Error('Cannot preview this SQLite database.');
@@ -99,18 +101,9 @@ export async function listSqlite(filePath: string): Promise<FilePreviewListing> 
     const snapshot = join(directory, 'snapshot.sqlite');
     await pipeline(source.createReadStream({ start: 0, end: before.size - 1, autoClose: false }), createWriteStream(snapshot, { flags: 'wx', mode: 0o600 }));
     const after = await source.stat();
-    await checkWal();
+    await checkRecoveryFiles();
     if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('Database changed during preview. Try a closed copy.');
-    const database = new Database(snapshot, { readonly: true, fileMustExist: true });
-    try {
-      database.pragma('trusted_schema = OFF');
-      const rows = database.prepare<[], { name: string; type: string }>("SELECT name, type FROM sqlite_schema WHERE type IN ('table', 'view') ORDER BY name LIMIT 1001").all();
-      return {
-        columns: ['Name', 'Type'],
-        rows: rows.slice(0, MAX_ENTRIES).map(row => [String(row.name), String(row.type)]),
-        notice: `Tables and views only; rows are not queried.${rows.length > MAX_ENTRIES ? ' Limited to 1,000 entries.' : ''}`,
-      };
-    } finally { database.close(); }
+    return await inspectSqliteSnapshot(snapshot, deadlineMs);
   } finally {
     await source.close();
     if (directory) await rm(directory, { recursive: true, force: true });
