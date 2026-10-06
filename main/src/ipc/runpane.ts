@@ -21,7 +21,7 @@ import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
-import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
+import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
@@ -2004,16 +2004,17 @@ async function submitCreateInitialInput(
     const sentAt = optionalString(customState.initialInputSentAt);
     const deliveryError = optionalString(customState.initialInputError);
     const delivered = Boolean(sentAt) && !deliveryError;
+    const delivery: RunpaneDelivery = delivered && readiness?.ok === true
+      ? await argumentDelivery(panel, tool, cwd, sentAt)
+      : { state: 'unknown', evidence: 'argv' };
     const result: RunpaneInitialInputDeliveryResult = {
       delivered,
       submitted: delivered,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       strategy: 'argument',
       sequenceName: 'argument',
-      verifiedSubmitted: delivered,
-      delivery: delivered
-        ? await argumentDelivery(panel, tool, cwd, sentAt)
-        : { state: 'unknown', evidence: 'argv' },
+      verifiedSubmitted: delivery.state === 'taken' || delivery.state === 'queued',
+      delivery,
       sentAt,
       nextCommand: readiness?.nextCommand ?? panelWaitCommand(panel.id),
     };
@@ -2035,6 +2036,7 @@ async function submitCreateInitialInput(
     return {
       delivered: false,
       submitted: false,
+      verifiedSubmitted: false,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       error: { message: 'The agent is not ready yet, so initial input is queued and sent once it is.' },
       nextCommand: readiness.nextCommand ?? panelWaitCommand(panel.id),
@@ -2051,9 +2053,8 @@ async function submitCreateInitialInput(
 }
 
 /**
- * A launch-argument prompt reached the agent with its launch (`argv`); the
- * transcript upgrades that to `transcript` evidence once the agent has
- * recorded the turn. One read, no waiting: create has already waited for ready.
+ * Launch arguments prove routing, not acceptance. Verify the recorded turn or
+ * a visible queue acknowledgement. One read: create has already waited for ready.
  */
 async function argumentDelivery(
   panel: ToolPanel,
@@ -2067,7 +2068,11 @@ async function argumentDelivery(
     const check = await checkTranscriptDelivery({ ...probe, sentAtMs });
     if (check.delivery) return check.delivery;
   }
-  return { state: 'taken', evidence: 'argv' };
+  const screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  if (probe && screenShowsQueuedMessage(screen.text, probe.agentType, tool.initialInput ?? '')) {
+    return { state: 'queued', evidence: 'screen' };
+  }
+  return { state: 'unknown', evidence: 'argv' };
 }
 
 async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
@@ -2512,6 +2517,7 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
   let lastScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
   let condition = request.condition ?? defaultWaitCondition(lastScreen.state);
   let requiresFirstEvaluation = true;
+  let readyCandidate = false;
 
   while (requiresFirstEvaluation || Date.now() - startedAt <= timeoutMs) {
     requiresFirstEvaluation = false;
@@ -2520,14 +2526,20 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
     const blocked = detectPanelBlocker(lastScreen.text, lastScreen.state.agentType, panel.id);
     const matched = isWaitConditionMatched(condition, lastScreen, request.contains, blocked);
 
-    if (matched) {
+    // Codex briefly paints a usable-looking composer before its first-run menu.
+    // Confirm CLI readiness on the next poll instead of accepting that boot frame.
+    const requiresConfirmation = condition === 'ready' && lastScreen.state.isCliPanel;
+    if (matched && (!requiresConfirmation || readyCandidate)) {
       return panelWaitResult(panel, condition, true, false, startedAt, lastScreen);
     }
+    readyCandidate = matched;
     if (blocked && condition !== 'text') {
       return panelWaitResult(panel, condition, false, false, startedAt, lastScreen, blocked);
     }
 
-    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), remainingMs));
   }
 
   return panelWaitResult(panel, condition, false, true, startedAt, lastScreen);
@@ -2549,7 +2561,8 @@ function isWaitConditionMatched(
     case 'ready':
       if (blocked || !screen.state.initialized) return false;
       if (!screen.state.isCliPanel) return true;
-      // Claude and Codex are ready once their composer is on screen, not at their first output.
+      if (screen.state.agentType === 'codex' && !hasConfiguredCodexScreen(screen.text)) return false;
+      // A composer alone is enough for Claude; Codex also has a provisional one.
       return screen.state.isCliReady === true
         && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
     case 'idle':
@@ -2593,6 +2606,29 @@ function detectPanelBlocker(
   panelId: string,
 ): RunpanePanelBlockedState | undefined {
   if (!text) return undefined;
+
+  const daemonChoice = text.match(/^\s*[›❯>]?\s*(\d+)\.\s*Run without daemon this time/im);
+  if (daemonChoice && /cannot use the background server/i.test(text)) {
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: `runpane panels input --panel ${panelId} --keys ${daemonChoice[1]},enter --yes --json`,
+    };
+  }
+  const trustChoice = text.match(/^\s*([›❯>])?\s*(?:(\d+)\.\s*)?(?:Trust and continue|Yes, I trust this folder)\s*$/im);
+  if (trustChoice && /(?:trust this folder|folder access|quick safety check)/i.test(text)) {
+    // Claude's unnumbered menu defaults to No. Never suggest Enter on that option.
+    const keys = trustChoice[2] ? `${trustChoice[2]},enter`
+      : trustChoice[1] ? 'enter'
+      : /^[ \t]*[›❯>][ \t]*No, exit[ \t]*$/im.test(text) ? 'down,enter' : undefined;
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: keys
+        ? `runpane panels input --panel ${panelId} --keys ${keys} --yes --json`
+        : panelScreenCommand(panelId),
+    };
+  }
 
   if (
     (agentType === 'codex' || /codex/i.test(text)) &&

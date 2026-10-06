@@ -578,7 +578,7 @@ describe('runpane IPC handlers', () => {
           sessionId: session.id,
           panelId: claudePanel.id,
           readiness: { ok: true, condition: 'ready' },
-          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: true },
+          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: false },
           nextCommand: expect.stringContaining(`--panel ${claudePanel.id}`),
         }],
       });
@@ -3014,10 +3014,10 @@ describe('runpane IPC handlers', () => {
   });
 
   it.each([
-    ['› Continue the existing task\n  gpt-5.6 high\n', true],
+    ['› Continue the existing task\n\n  gpt-5.6 high\n  ? for shortcuts\n', true],
     ['› [Pasted Content 2048 chars]\n  Ctrl+Enter to submit\n', true],
-    ['› Ask Codex to do anything\n  gpt-5.6 high\n', false],
-    ['previous output\n›\n  gpt-5.6 high\n', false],
+    ['› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n', false],
+    ['previous output\n›\n\n  gpt-5.6 high\n  ? for shortcuts\n', false],
   ])('reports whether the Codex composer has undelivered text', async (text, expected) => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
       terminalSnapshot(text, 'idle'),
@@ -3074,9 +3074,10 @@ describe('runpane IPC handlers', () => {
   });
 
   it('waits for ready terminal state with bounded screen output', async () => {
+    vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: '› Ask Codex to do anything\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -3088,10 +3089,13 @@ describe('runpane IPC handlers', () => {
     });
     const registry = createRegistry();
 
-    const result = await registry.invoke('runpane:panels:wait', [{
+    const pending = registry.invoke('runpane:panels:wait', [{
       panelId: terminalPanel.id,
       timeoutMs: 10,
     }]);
+
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await pending;
 
     expect(result).toMatchObject({
       ok: true,
@@ -3101,7 +3105,7 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       screen: {
         source: 'scrollback',
-        text: '› Ask Codex to do anything\n',
+        text: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       },
       nextCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
     });
@@ -3164,6 +3168,120 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('reports a first-run trust dialog and leaves the launch prompt unverified', async () => {
+    const panel = {
+      ...terminalPanel,
+      state: { ...terminalPanel.state, customState: { agentType: 'codex', initialInputSentAt: '2026-01-01T00:02:00.000Z' } },
+    };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(panel);
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'Trust this folder?\n› 1. Trust and continue\n  2. Quit\n', 'idle', 'codex',
+    ));
+    const result = await createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id }, waitReady: true, readyTimeoutMs: 100,
+      panes: [{ name: 'issue-946', tool: { agent: 'codex', initialInput: 'Read prompt.md' } }],
+    }]);
+    expect(result).toMatchObject({ items: [{
+      readiness: { ok: false, blocked: {
+        kind: 'first-run-dialog', message: expect.stringContaining('Trust this folder?'),
+        suggestedCommand: `runpane panels input --panel ${panel.id} --keys 1,enter --yes --json`,
+      } },
+      initialInput: { verifiedSubmitted: false, delivery: { state: 'unknown' } },
+    }] });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['claude', 'Quick safety check\nDo you trust this folder?\n❯ 1. Yes, I trust this folder\n  2. No, exit', '1'],
+    ['codex', 'Cannot use the background server\n  1. Retry\n› 2. Run without daemon this time\n  3. Exit', '2'],
+  ] as const)('identifies %s first-run choices from the live screen', async (agent, text, key) => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', agent));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
+      .toMatchObject({ ok: false, timedOut: false, blocked: {
+        kind: 'first-run-dialog', message: text,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys ${key},enter --yes --json`,
+      } });
+  });
+
+  it('selects the affirmative Claude trust option when No is selected by default', async () => {
+    const text = 'Accessing workspace:\n/tmp/new-repo\nQuick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\nEnter to confirm · Esc to cancel';
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', 'claude'));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
+      .toMatchObject({ ok: false, blocked: {
+        kind: 'first-run-dialog', message: text,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys down,enter --yes --json`,
+      } });
+  });
+
+  it('waits past a transient composer before reporting startup ready', async () => {
+    const composer = terminalSnapshot('› Ask Codex to do anything', 'idle', 'codex');
+    const dialog = terminalSnapshot('Cannot use the background server\n  1. Run without daemon this time\n› 2. Cancel', 'idle', 'codex');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(composer)
+      .mockReturnValueOnce(composer)
+      .mockReturnValue(dialog);
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 100, intervalMs: 1,
+    }])).toMatchObject({ ok: false, timedOut: false, blocked: { kind: 'first-run-dialog' } });
+  });
+
+  it('waits for trust after a provisional Codex composer persists across several polls', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const provisional = terminalSnapshot(
+      '>_ OpenAI Codex (v0.160.0)\n  permissions: YOLO mode\n  Pull up a prompt.\n\n› Ask Codex to do anything\n  ? for shortcuts',
+      'active',
+    );
+    const trust = terminalSnapshot('Folder access\nTrust this folder?\n› 1. Trust and continue\n  2. Quit', 'active');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      Date.now() - startedAt < 1500 ? provisional : trust);
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 5000, intervalMs: 500,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      ok: false, matched: false, timedOut: false,
+      blocked: { kind: 'first-run-dialog', message: expect.stringContaining('Trust this folder?') },
+    });
+  });
+
+  it.each([
+    'GPT-6.1-Sol low fast · /tmp/qa\n  ? for shortcuts',
+    'GPT-6-Astra medium · ~\\qa\n  ← for agents · ? for shortcuts',
+    'gpt-5.6 high\n  ? for shortcuts',
+    'o3 high · /tmp/qa\n  ? for shortcuts',
+    '100% context left\n  ? for shortcuts',
+  ])('recognizes configured Codex readiness from its live footer: %s', async (footer) => {
+    vi.useFakeTimers();
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      `› Ask Codex to do anything\n\n  ${footer}`, 'idle',
+    ));
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 30, intervalMs: 1,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({ ok: true, matched: true, timedOut: false });
+  });
+
+  it('does not infer Codex readiness from missing chrome or a model mentioned above the composer', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'gpt-5.6 high\nPrevious model information\n› Ask Codex to do anything\n  ? for shortcuts', 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 10, intervalMs: 1,
+    }])).toMatchObject({ ok: false, matched: false, timedOut: true });
+  });
+
+  it('does not mistake model names typed in the provisional composer for a status row', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      '› Compare these models:\n  gpt-5.6 high\n\n\n  ? for shortcuts', 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 10, intervalMs: 1,
+    }])).toMatchObject({ ok: false, timedOut: true });
+  });
+
   it('reports Codex update prompts as blockers instead of ready', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
@@ -3214,7 +3332,7 @@ describe('runpane IPC handlers', () => {
       condition: 'ready',
       matched: false,
       timedOut: false,
-      blocked: { kind: 'agent-prompt' },
+      blocked: { kind: 'first-run-dialog' },
     });
   });
 
@@ -4022,7 +4140,7 @@ describe('runpane IPC handlers', () => {
     } as never);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: '› Ask Codex to do anything\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -4069,7 +4187,7 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('reports earned Claude argument delivery during wait-ready pane creation', async () => {
+  it('requires observed evidence before verifying Claude argument delivery during pane creation', async () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     const claudePanel = {
       id: 'panel-1',
@@ -4135,8 +4253,8 @@ describe('runpane IPC handlers', () => {
           submitted: true,
           strategy: 'argument',
           sequenceName: 'argument',
-          verifiedSubmitted: true,
-          delivery: { state: 'taken', evidence: 'argv' },
+          verifiedSubmitted: false,
+          delivery: { state: 'unknown', evidence: 'argv' },
         },
       }],
     });
@@ -4234,12 +4352,12 @@ describe('runpane IPC handlers', () => {
       .mockReturnValue(2);
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReturnValue('2026-01-01T00:01:59.300Z');
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
       .mockReturnValueOnce(terminalSnapshot('Working on TM-x\n›', 'active'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4285,7 +4403,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReturnValue(undefined);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
-      terminalSnapshot('› /do TM-x', 'idle', 'codex', '2026-01-01T00:01:59.000Z'),
+      terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle', 'codex', '2026-01-01T00:01:59.000Z'),
     );
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4321,10 +4439,10 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(codexPanel);
     vi.mocked(panelManager.getPanel).mockReturnValue(codexPanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
       .mockReturnValue(terminalSnapshot('You ran /frobnicate x\nWorking\n›', 'active'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4371,7 +4489,7 @@ describe('runpane IPC handlers', () => {
       .mockReturnValueOnce(3)
       .mockReturnValue(3);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
-      terminalSnapshot('› /do TM-x', 'idle', 'codex', new Date(Date.now() + 1).toISOString()),
+      terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle', 'codex', new Date(Date.now() + 1).toISOString()),
     );
     const startedAt = Date.now();
 
@@ -4478,9 +4596,9 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(codexPanel);
     vi.mocked(panelManager.getPanel).mockReturnValue(codexPanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
       .mockReturnValue(terminalSnapshot('›', 'idle'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4563,7 +4681,7 @@ describe('runpane IPC handlers', () => {
             // SAFETY: The `custom` kind is handled above, leaving only agent kinds the snapshot frames as claude/codex.
             return terminalSnapshot(
               toolKind === 'codex'
-                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}`
+                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}\n\n  gpt-5.6 high\n  ? for shortcuts`
                 : `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`,
               'idle',
               toolKind as 'claude' | 'codex',
@@ -4579,7 +4697,12 @@ describe('runpane IPC handlers', () => {
             readyTimeoutMs: 100,
             panes: [{ name: `${toolKind}-${inputCase.name}`, tool }],
           }]);
-          await vi.runAllTimersAsync();
+          let completed = false;
+          void resultPromise.then(() => { completed = true; }, () => { completed = true; });
+          await vi.waitFor(async () => {
+            await vi.runAllTimersAsync();
+            expect(completed).toBe(true);
+          }, { interval: 1 });
           // SAFETY: The panes:create handler resolves to a result object exposing the per-pane `items` array read below.
           const result = await resultPromise as { items: Array<{ ok?: boolean; initialInput?: unknown }> };
           // SAFETY: createPanel was invoked for a terminal panel, so the captured initialState is the terminal customState.
@@ -4602,10 +4725,10 @@ describe('runpane IPC handlers', () => {
             waitReady && toolKind !== 'custom',
           );
           if (waitReady && toolKind !== 'custom' && inputCase.name !== 'slash') {
-            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} verified result`).toMatchObject({
+            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} unverified launch result`).toMatchObject({
               ok: true,
               initialInput: {
-                verifiedSubmitted: true,
+                verifiedSubmitted: false,
               },
             });
           }

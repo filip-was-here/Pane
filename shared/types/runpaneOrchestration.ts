@@ -420,6 +420,7 @@ export type RunpaneAgentDetection = 'declared' | 'command' | 'process' | 'screen
 export type RunpanePanelScreenSource = 'alternateScreen' | 'scrollback' | 'persistedOutput' | 'empty';
 export type RunpanePanelWaitCondition = 'initialized' | 'ready' | 'idle' | 'text';
 export type RunpanePanelBlockerKind =
+  | 'first-run-dialog'
   | 'codex-update'
   | 'agent-prompt'
   | 'submission_unverified'
