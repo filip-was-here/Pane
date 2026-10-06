@@ -99,31 +99,32 @@ it.each(['bad.zip', 'bad.tar', 'bad.sqlite'])('fails clearly for malformed %s', 
   await expect(name.endsWith('sqlite') ? listSqlite(path) : listArchive(path)).rejects.toThrow();
 });
 
-it.each(['direct', 'symlink', 'hardlink'] as const)('refuses a spilled rollback transaction via %s without changing source files', async (access, context) => {
-  if (access === 'symlink' && process.platform === 'win32') context.skip();
-  const path = join(directory, 'rollback.sqlite');
-  const writer = new Database(path);
-  try {
-    writer.pragma('journal_mode = DELETE');
-    writer.pragma('cache_size = 2');
-    writer.transaction(() => {
-      for (let index = 0; index < 100; index++) writer.exec(`CREATE TABLE committed_${index} (value TEXT)`);
-    })();
-    const alias = join(directory, 'alias.sqlite');
-    if (access === 'symlink') await symlink(path, alias);
-    if (access === 'hardlink') await link(path, alias);
-    writer.exec('BEGIN IMMEDIATE');
-    for (let index = 0; index < 100; index++) writer.exec(`ALTER TABLE committed_${index} RENAME TO temporary_${index}`);
-    const before = await readFile(path);
-    const journal = await readFile(`${path}-journal`);
-    const names = await readdir(directory);
-    expect(journal.length).toBeGreaterThan(0);
-    await expect(listSqlite(access === 'direct' ? path : alias)).rejects.toThrow(access === 'hardlink' ? 'hard links' : 'rollback journal');
-    expect(await readFile(path)).toEqual(before);
-    expect(await readFile(`${path}-journal`)).toEqual(journal);
-    expect(await readdir(directory)).toEqual(names);
-  } finally { writer.close(); }
-});
+for (const access of ['direct', 'symlink', 'hardlink'] as const) {
+  it.skipIf(access === 'symlink' && process.platform === 'win32')(`refuses a spilled rollback transaction via ${access} without changing source files`, async () => {
+    const path = join(directory, 'rollback.sqlite');
+    const writer = new Database(path);
+    try {
+      writer.pragma('journal_mode = DELETE');
+      writer.pragma('cache_size = 2');
+      writer.transaction(() => {
+        for (let index = 0; index < 100; index++) writer.exec(`CREATE TABLE committed_${index} (value TEXT)`);
+      })();
+      const alias = join(directory, 'alias.sqlite');
+      if (access === 'symlink') await symlink(path, alias);
+      if (access === 'hardlink') await link(path, alias);
+      writer.exec('BEGIN IMMEDIATE');
+      for (let index = 0; index < 100; index++) writer.exec(`ALTER TABLE committed_${index} RENAME TO temporary_${index}`);
+      const before = await readFile(path);
+      const journal = await readFile(`${path}-journal`);
+      const names = await readdir(directory);
+      expect(journal.length).toBeGreaterThan(0);
+      await expect(listSqlite(access === 'direct' ? path : alias)).rejects.toThrow(access === 'hardlink' ? 'hard links' : 'rollback journal');
+      expect(await readFile(path)).toEqual(before);
+      expect(await readFile(`${path}-journal`)).toEqual(journal);
+      expect(await readdir(directory)).toEqual(names);
+    } finally { writer.close(); }
+  });
+}
 
 it.skipIf(process.platform === 'win32')('checks WAL beside a symlink target and permits a closed target', async () => {
   const path = join(directory, 'target.sqlite');
