@@ -4366,7 +4366,7 @@ async function waitForWorktreeRemovalByPolling(
     if (!fs.existsSync(worktreePath)) {
       return 'completed';
     }
-    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
   }
   return fs.existsSync(worktreePath) ? 'timeout' : 'completed';
 }
