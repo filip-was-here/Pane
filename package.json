@@ -1,6 +1,6 @@
 {
   "name": "Pane",
-  "version": "2.4.167",
+  "version": "2.4.169",
   "private": true,
   "description": "Pane - Terminal-first AI code assistant manager with Windows support",
   "author": {
@@ -99,6 +99,7 @@
     "test": "playwright test",
     "test:ci": "playwright test --config=playwright.ci.config.ts",
     "test:ci:minimal": "playwright test --config=playwright.ci.minimal.config.ts",
+    "test:renderer-selection": "pnpm --filter frontend exec tsc --noEmit -p ../tests/renderer/tsconfig.json && playwright test --config=tests/renderer/playwright.config.ts",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed"
   },

@@ -52,6 +52,18 @@ and `backend-debug.log` in the repository root. Both are reset at startup.
 A dev build is the same app as an installed Pane, and by default it shares that
 install's data:
 
+- **OS startup integration is not isolated** by a separate Pane data directory
+  or Chromium profile. Startup calls `syncAutoStartOnBoot`: the default enables
+  login registration, and disabling it can remove an existing Linux autostart entry. Windows/macOS login settings can
+  also change. Native QA needs a separate OS environment or a test-runtime guard
+  for this integration before launch; setting `autoStartOnBoot: false` is not an
+  isolation mechanism.
+- **Analytics** are on by default in a fresh data directory. Setting
+  `analytics.enabled: false` in config alone does not prevent the first-render
+  default policy from enabling analytics when neither `analytics_consent_shown`
+  nor `analytics_default_applied` records a choice. Native QA must establish an
+  explicit analytics choice and its persisted preference before the first UI
+  render, or isolate analytics with a test-runtime guard.
 - **Pane data** (`sessions.db`, `config.json`, skills) lives in `~/.pane`
   unless you set `PANE_DIR` or pass `--pane-dir`. Always set one for `pnpm dev`,
   Playwright runs and scripts. Keep the path short, like `~/.pane_test`: a long
@@ -69,12 +81,14 @@ install's data:
   ```
   `NODE_ENV=production` loads the built renderer from `frontend/dist`, so no
   Vite server is needed. Rebuild after changes.
-- **Analytics** are on by default in a fresh data directory. To keep test runs
-  out of the product analytics, create `<PANE_DIR>/config.json` with
-  `{"analytics": {"enabled": false}}` before the first launch.
 - A copy of a real `sessions.db` makes the dev build reconcile reserve worktrees
   in the real repositories it lists. Use a fresh data directory unless you need
   real data.
+
+The renderer selection race tests run with `PANE_DIR=/tmp/pane_test pnpm test:renderer-selection`.
+They mount the production sidebar and views in Chromium with a controllable Electron transport;
+they do not launch Electron or use a Pane data directory. Install Chromium with
+`pnpm exec playwright install chromium` first.
 
 ### Native modules
 

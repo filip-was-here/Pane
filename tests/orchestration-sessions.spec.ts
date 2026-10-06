@@ -1749,10 +1749,27 @@ test('the Session "+" menu opens terminals and browsers as tabs, apart from the 
 
 test('agent-opened pages open as tabs in a split beside the Session conversation', async ({ page }, testInfo) => {
   await installSessionsFixture(page, [sessionFixture('plans', 'Plan demo', '', '', new Date(0).toISOString())]);
+  await page.addInitScript(() => {
+    const invoke = window.electronAPI.invoke;
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:checkInitialized' || channel === 'terminal:getState') {
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      return invoke(channel, ...args);
+    };
+  });
   await page.goto('/');
   await page.getByTestId('orchestration-session-plans').click();
   const workspaceTabs = page.getByTestId('session-workspace-tabs');
   await expect(workspaceTabs.getByRole('tab').first()).toBeVisible();
+  await expect(page.locator('.xterm-screen')).toHaveCount(1);
+  await expect(page.locator('.xterm-screen').first()).toBeVisible();
+  await page.evaluate(() => {
+    // SAFETY: the IPC fixture exposes the host's one-shot CLI-ready event.
+    const mock = (window as typeof window & { __paneTestElectronMock: { emitTerminalCliReady: (id: string) => void } }).__paneTestElectronMock;
+    mock.emitTerminalCliReady('__orchestration_panel_plans_claude');
+  });
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
   const openPage = (id: string, title: string, active = true, reused = false) => page.evaluate(({ id, title, active, reused }) => {
     // SAFETY: installElectronApiMock adds these controls before the app loads.
     const mockWindow = window as typeof window & { __paneTestElectronMock: { emitPanelCreated: (panel: ToolPanel) => void; emitPanelUpdated: (panel: ToolPanel) => void } };
@@ -1768,6 +1785,7 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   await openPage('plan-page', 'plan.html');
   const groupStrips = page.locator('.panel-group-tab-bar');
   await expect(groupStrips).toHaveCount(2);
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
   // Split, every group owns a strip: the agent tab moves into its group's strip
   // (the toolbar row goes away) and opened pages get the side strip, so all tabs
   // sit on one row under the title bar.
@@ -1777,8 +1795,12 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   const [agentStrip, pageStrip] = [await layoutBox(groupStrips.nth(0)), await layoutBox(groupStrips.nth(1))];
   expect(pageStrip.y).toBe(agentStrip.y);
   expect(pageStrip.height).toBe(agentStrip.height);
-  const titleBar = await layoutBox(page.getByTestId('window-title-bar'));
-  expect(agentStrip.y).toBe(titleBar.y + titleBar.height);
+  // Linux uses native window decorations rather than the renderer title bar.
+  const titleBar = page.getByTestId('window-title-bar');
+  if (await titleBar.count()) {
+    const titleBarBox = await layoutBox(titleBar);
+    expect(agentStrip.y).toBe(titleBarBox.y + titleBarBox.height);
+  }
 
   await openPage('report-page', 'report.html', false);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
@@ -2048,3 +2070,76 @@ test('New preserves multiple-Pane options while switching repositories', async (
   await expect(page.getByRole('switch', { name: 'Start pinned', exact: true })).toBeChecked();
   await expect(page.getByRole('button', { name: /Create 3 Panes/ })).toBeEnabled();
 });
+
+test('first Session load uses persisted readiness when the ready event precedes the terminal', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('early-ready', 'Already ready', '', '', new Date(0).toISOString())]);
+  await page.addInitScript(() => {
+    const invoke = window.electronAPI.invoke;
+    const panel: ToolPanel = {
+      id: '__orchestration_panel_early-ready_claude',
+      sessionId: '__orchestration_session_early-readyterminal__',
+      type: 'terminal', title: 'Already ready · claude',
+      state: { isActive: true, hasBeenViewed: true, customState: { isCliPanel: true, isCliReady: false, isInitialized: true } },
+      metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 0, permanent: true },
+    };
+    window.electronAPI.panels.getSessionPanels = async () => ({ success: true, data: [panel] });
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:get-layout') {
+        // The host is already running the agent while the client loads its layout.
+        // SAFETY: these are the fixture's public host-event controls.
+        const mock = (window as typeof window & { __paneTestElectronMock: {
+          emitPanelUpdated: (panel: ToolPanel) => void;
+          emitTerminalCliReady: (id: string) => void;
+        } }).__paneTestElectronMock;
+        mock.emitPanelUpdated({ ...panel, state: { ...panel.state, customState: { isCliPanel: true, isCliReady: true, isInitialized: true } } });
+        mock.emitTerminalCliReady(panel.id);
+      }
+      return invoke(channel, ...args);
+    };
+  });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-early-ready').click();
+  await expect(page.locator('.xterm-screen')).toHaveCount(1);
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+});
+
+for (const failure of ['stalled', 'rejected', 'font-stalled'] as const) {
+test(`a ${failure} terminal load offers Retry and recovers without switching Sessions`, async ({ page }) => {
+  await page.clock.install();
+  await installSessionsFixture(page, [sessionFixture('retry', 'Retry demo', '', '', new Date(0).toISOString())]);
+  await page.addInitScript((failure) => {
+    const invoke = window.electronAPI.invoke;
+    let stall = true;
+    window.addEventListener('test-host-recovered', () => { stall = false; });
+    const loadFont = document.fonts.load.bind(document.fonts);
+    if (failure === 'font-stalled') document.fonts.load = (...args) => stall ? new Promise(() => {}) : loadFont(...args);
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:checkInitialized' && stall && failure !== 'font-stalled') {
+        if (failure === 'rejected') throw new Error('Host unavailable');
+        return new Promise(() => {});
+      }
+      return invoke(channel, ...args);
+    };
+  }, failure);
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-retry').click();
+  if (failure !== 'rejected') {
+    await expect(page.getByRole('status', { name: 'Loading terminal' })).toBeVisible();
+    await page.clock.fastForward(31_000);
+  }
+  await expect(page.getByRole('alert').filter({ hasText: 'Terminal' })).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new Event('test-host-recovered')));
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.locator('.xterm-screen')).toHaveCount(1);
+  await expect(page.locator('.xterm-screen').first()).toBeVisible();
+  await page.evaluate(() => {
+    // SAFETY: the IPC fixture exposes the host's one-shot CLI-ready event.
+    const mock = (window as typeof window & { __paneTestElectronMock: { emitTerminalCliReady: (id: string) => void } }).__paneTestElectronMock;
+    mock.emitTerminalCliReady('__orchestration_panel_retry_claude');
+  });
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+});
+
+}

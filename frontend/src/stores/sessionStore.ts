@@ -19,6 +19,8 @@ interface CreateSessionRequest {
 interface SessionStore {
   sessions: Session[];
   activeSessionId: string | null;
+  selectionRevision: number;
+  selectionError: string | null;
   activeMainRepoSession: Session | null; // Special storage for main repo session
   isLoaded: boolean;
   terminalOutput: Record<string, string[]>; // sessionId -> terminal output lines
@@ -36,6 +38,7 @@ interface SessionStore {
   updateSession: (session: Session) => void;
   deleteSession: (session: Pick<Session, 'id'>) => void;
   setActiveSession: (sessionId: string | null) => Promise<void>;
+  invalidateHost: () => void;
   addSessionOutput: (output: SessionOutput) => void;
   setSessionOutput: (sessionId: string, output: string) => void;
   setSessionOutputs: (sessionId: string, outputs: SessionOutput[]) => void;
@@ -78,6 +81,8 @@ let pendingSelectionFetch: { sessionId: string; promise: ReturnType<typeof API.s
 export const useSessionStore = create<SessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
+  selectionRevision: 0,
+  selectionError: null,
   activeMainRepoSession: null,
   isLoaded: false,
   terminalOutput: {},
@@ -92,6 +97,16 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   activeSpotlights: new Map(),
   
   setSessions: (sessions) => set({ sessions: normalizeSessions(sessions) }),
+  invalidateHost: () => {
+    selectionVersion += 1;
+    pendingSelectionFetch = null;
+    const timer = get().gitStatusBatchTimer;
+    if (timer) clearTimeout(timer);
+    set({ sessions: [], activeSessionId: null, activeMainRepoSession: null,
+      selectionRevision: selectionVersion, selectionError: null, isLoaded: false,
+      terminalOutput: {}, deletingSessionIds: new Set(), activeSpotlights: new Map(), gitStatusLoading: new Set(),
+      pendingGitStatusLoading: new Map(), pendingGitStatusUpdates: new Map(), gitStatusBatchTimer: null });
+  },
   
   loadSessions: (sessions) => set({ sessions: normalizeSessions(sessions), isLoaded: true }),
   
@@ -172,6 +187,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   
   setActiveSession: async (sessionId) => {
     const version = ++selectionVersion;
+    set({ selectionRevision: version, selectionError: null });
     const state = get();
     const wasAlreadyActive = state.activeSessionId === sessionId;
     const reusableFetch = wasAlreadyActive && pendingSelectionFetch?.sessionId === sessionId
@@ -282,12 +298,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
         get().markSessionAsViewed(sessionId);
       } else {
         console.error('[SessionStore] Failed to fetch session:', sessionId, response);
-        void get().setActiveSession(null);
+        set({ selectionError: response.error || 'Failed to open Pane' });
       }
     } catch (error) {
       if (version !== selectionVersion || get().activeSessionId !== sessionId) return;
       console.error('[SessionStore] Error setting active session:', error);
-      void get().setActiveSession(null);
+      set({ selectionError: error instanceof Error ? error.message : 'Failed to open Pane' });
     } finally {
       if (pendingSelectionFetch === fetch) pendingSelectionFetch = null;
     }

@@ -54,6 +54,7 @@ interface DropdownPosition {
 // Hold the loading overlay at least this long past ready so the terminal
 // underneath finishes painting before it is revealed.
 const TERMINAL_OVERLAY_LINGER_MS = 150;
+const TERMINAL_LOADING_TIMEOUT_MS = 30_000;
 
 const SKELETON_TRANSCRIPT_WIDTHS = ['w-2/3', 'w-1/2', 'w-5/6', 'w-1/3', 'w-3/4', 'w-2/5'];
 
@@ -266,6 +267,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
+  const [initAttempt, setInitAttempt] = useState(0);
   const [interceptorState, setInterceptorState] = useState<InterceptorState | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [windowFocused, setWindowFocused] = useState(true);
@@ -372,6 +374,16 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
   // active, hide only after a short linger so the terminal underneath has
   // finished painting before the mask lifts.
   const overlayActive = !isInitialized || isRefreshing || (isCliPanel && !isCliReady);
+  useEffect(() => {
+    if (!overlayActive) {
+      setInitError(null);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setInitError('Terminal loading timed out. Check the host connection and retry.');
+    }, TERMINAL_LOADING_TIMEOUT_MS);
+    return () => clearTimeout(timeout);
+  }, [overlayActive, initAttempt]);
   const [overlayVisible, setOverlayVisible] = useState(true);
   useEffect(() => {
     if (overlayActive) {
@@ -890,6 +902,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       devLog.debug('[TerminalPanel] Missing terminal ref, skipping initialization');
       return;
     }
+    setInitError(null);
+    setIsInitialized(false);
+    needsFullActivationRefreshRef.current = true;
 
     let terminal: Terminal | null = null;
     let fitAddon: FitAddon | null = null;
@@ -907,6 +922,19 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     const initializeTerminal = async () => {
       try {
         devLog.debug('[TerminalPanel] Starting initialization for panel:', panel.id);
+
+        // A retry can follow a missed one-shot cliReady event. Read the host's
+        // persisted readiness instead of waiting for that event to fire again.
+        if (initAttempt > 0 && isCliPanelRef.current) {
+          const result = await window.electronAPI.panels.getSessionPanels(panel.sessionId);
+          if (disposed) return;
+          if (!result.success) throw new Error(result.error || 'Could not reload terminal state');
+          const current = result.data?.find(candidate => candidate.id === panel.id);
+          const readiness = decodeOptionalBoundary(current?.state.customState, boundary.object({
+            isCliReady: boundary.optional(boundary.boolean),
+          }));
+          if (readiness?.isCliReady) setIsCliReady(true);
+        }
 
         // Check if already initialized on backend
         const initialized = await window.electronAPI.invoke('panels:checkInitialized', panel.id);
@@ -1186,6 +1214,10 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         if (terminalRef.current && !disposed) {
           devLog.debug('[TerminalPanel] Opening terminal in DOM element:', terminalRef.current);
           terminal.open(terminalRef.current);
+          // Teardown must own this renderer even if a font/addon request never
+          // settles; Retry reuses the container while abandoning this attempt.
+          xtermRef.current = terminal;
+          fitAddonRef.current = fitAddon;
           devLog.debug('[TerminalPanel] Terminal opened in DOM');
           // xterm takes keys from here on, but the input handler is attached
           // only after the awaits below. Hold early keys for it instead of
@@ -1198,6 +1230,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
             document.fonts.load(`${terminalFontSize}px "${terminalFontFamily}"`).catch(() => {}),
             document.fonts.load(`${terminalFontSize}px "Symbols Nerd Font Mono"`).catch(() => {}),
           ]);
+          if (disposed) return;
           // Never fit against a hidden/mid-layout container (display:none keep-alive
           // tabs measure 0×0): FitAddon resizes the grid with no floor, and background
           // PTY output then parses into a garbage-width buffer that reflow can't fix.
@@ -1284,13 +1317,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
           }
 
           if (disposed) {
-            terminal.dispose();
-            fitAddon.dispose();
             return;
           }
-          xtermRef.current = terminal;
           setTerminalInstance(terminal);
-          fitAddonRef.current = fitAddon;
 
           // Track scroll position with direction-based sticky behaviour.
           // Also snap to true bottom when the user scrolls close enough — xterm's mouse
@@ -1937,7 +1966,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
       
       setIsInitialized(false);
     };
-  }, [panel.id]); // Only depend on panel.id to prevent re-initialization on session switch
+  }, [panel.id, initAttempt]); // Reinitialize only for a different panel or an explicit retry.
 
   // Shared activation refresh for both power modes: fires on tab activation and
   // window refocus (activationVisible = panelVisible && windowFocused). Initial,
@@ -2100,14 +2129,6 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
     );
   }
 
-  if (initError) {
-    return (
-      <div className="flex items-center justify-center h-full text-red-500">
-        Terminal initialization failed: {initError}
-      </div>
-    );
-  }
-
   // Always render the terminal div to keep XTerm instance alive
   return (
     <div
@@ -2211,9 +2232,12 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         </button>
       )}
 
-      {overlayVisible && (
+      {(overlayVisible || initError) && (
         <div className="absolute inset-0 bg-surface-primary z-10" data-testid="terminal-activation-mask">
-          <TerminalLoadingSkeleton />
+          {initError ? <div className="flex h-full flex-col items-center justify-center gap-3 p-4 text-text-secondary">
+            <p role="alert">Terminal could not load: {initError}</p>
+            <button type="button" className="rounded bg-surface-secondary px-3 py-2 text-text-primary" onClick={() => setInitAttempt(attempt => attempt + 1)}>Retry</button>
+          </div> : <TerminalLoadingSkeleton />}
         </div>
       )}
 
@@ -2255,6 +2279,7 @@ const TerminalPanel: React.FC<TerminalPanelProps> = React.memo(({ panel, isActiv
         x={selectionPopover.x}
         y={selectionPopover.y}
         text={selectionPopover.text}
+        panelTitle={panel.title}
         workingDirectory={workingDirectory}
         sessionId={panel.sessionId}
         isRemoteMode={isRemoteMode}
