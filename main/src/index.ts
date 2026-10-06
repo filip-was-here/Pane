@@ -16,7 +16,12 @@ const launchRemoteSetup = hasRemoteSetupLaunchArg();
 
 // Fix GTK 2/3 and GTK 4 conflict on Linux (Electron 36 issue)
 // This MUST be done before importing electron
-import { app } from 'electron';
+import { app, protocol } from 'electron';
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: 'pane-media',
+  privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true },
+}]);
 
 if (process.platform === 'darwin') {
   // Work around unrecoverable Skia Graphite rendering glitches on macOS.

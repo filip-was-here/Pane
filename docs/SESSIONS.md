@@ -533,15 +533,18 @@ Sessions keeps their shells and files separate.
 ## Plans, pages, and split view
 
 Agents show pages and files with `runpane panels open --file <path>` or
-`--url <url>`. HTML files open as a browser tab; other files open in an editor
-tab. By default the tab opens in split view: the first one splits the stage to
-the right of the conversation, and later ones join that side group as tabs.
+`--url <url>`. Files open in an editor tab with read-only previews for supported
+formats; HTML opens as read-only source. Use `--url` with an HTTP, HTTPS or file
+URL for an intentional live browser tab. By default the tab opens in split view:
+the first one splits the stage to the right of the conversation, and later ones
+join that side group as tabs.
 `--tab` opens it as a plain tab instead. Reopening the same file or URL reuses
 and reloads its tab. This works the same in Sessions and in project Panes.
 
 Generated Session instructions ask the orchestrator to write plans, reports, and
 other documents as self-contained HTML files in its Session folder and open them
-this way. Opening a Session never submits a prompt or starts work just to write
+with `--url` when rendered HTML is intended, or `--file` to inspect the source.
+Opening a Session never submits a prompt or starts work just to write
 a document.
 
 While the stage is split, each group has its own tab strip, including the agent

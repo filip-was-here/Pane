@@ -6782,22 +6782,21 @@ describe('runpane IPC handlers', () => {
       });
     }
 
-    it('opens an HTML file as a browser tab in split view by default', async () => {
+    it('opens an HTML file in the editor preview in split view by default', async () => {
       const registry = createRegistry(openServices({ ...session, worktreePath: worktree }));
 
       const result = await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: 'plan.html', source: 'agent' }]);
 
       const request = vi.mocked(panelManager.createPanel).mock.calls[0][0];
-      const url = pathToFileURL(path.join(worktree, 'plan.html')).href;
       expect(request).toMatchObject({
         sessionId: session.id,
-        type: 'browser',
+        type: 'editor',
         title: 'plan.html',
         metadata: { openPlacement: 'split' },
         activate: true,
       });
-      expect(request.initialState).toEqual({ customState: { currentUrl: url } });
-      expect(result).toMatchObject({ ok: true, type: 'browser', filePath: 'plan.html', url, placement: 'split', reused: false, active: true });
+      expect(request.initialState).toEqual({ customState: { filePath: 'plan.html', isPreview: false, isDirty: false } });
+      expect(result).toMatchObject({ ok: true, type: 'editor', filePath: 'plan.html', placement: 'split', reused: false, active: true });
     });
 
     it('opens other files as editor tabs and honors --tab and --no-focus', async () => {
@@ -6847,7 +6846,7 @@ describe('runpane IPC handlers', () => {
 
       const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, filePath: 'plan.html' }]);
 
-      expect(result).toMatchObject({ paneId: orchestrator.id, type: 'browser', filePath: 'plan.html' });
+      expect(result).toMatchObject({ paneId: orchestrator.id, type: 'editor', filePath: 'plan.html' });
     });
 
     it.skipIf(process.platform !== 'win32')('opens a WSL Session file using its Linux mount path', async () => {
@@ -6861,7 +6860,7 @@ describe('runpane IPC handlers', () => {
       const registry = createRegistry(services);
       const linuxPath = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}/plan.html`;
       const result = await registry.invoke('runpane:panels:open', [{ paneId: orchestrator.id, filePath: linuxPath }]);
-      expect(result).toMatchObject({ type: 'browser', filePath: 'plan.html' });
+      expect(result).toMatchObject({ type: 'editor', filePath: 'plan.html' });
     });
 
     it.skipIf(process.platform !== 'win32')('normalizes a WSL Session file URL to the same target as --file', async () => {
@@ -6911,9 +6910,8 @@ describe('runpane IPC handlers', () => {
         // SAFETY: Browser resolution reads only pathResolver.
         vi.mocked(services.sessionManager.getProjectContext).mockReturnValue({ pathResolver: resolver } as never);
         const registry = createRegistry(services);
-        const url = pathToFileURL(path.join(hostRoot, 'plan #%.html')).href;
         for (const filePath of ['plan #%.html', `${linuxRoot}/plan #%.html`, path.join(hostRoot, 'plan #%.html'), path.join(hostRoot, 'plan #%.html').replace('wsl.localhost', 'wsl$')]) {
-          expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath }])).toMatchObject({ url, filePath: 'plan #%.html' });
+          expect(await registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath }])).toMatchObject({ type: 'editor', filePath: 'plan #%.html' });
         }
         await expect(registry.invoke('runpane:panels:open', [{ paneId: session.id, filePath: '/etc/passwd' }])).rejects.toThrow('inside the Pane worktree');
         const mounted = `/mnt/${worktree[0].toLowerCase()}${worktree.slice(2).replaceAll('\\', '/')}`;
