@@ -2999,6 +2999,18 @@ describe('runpane IPC handlers', () => {
       } });
   });
 
+  it('waits past a transient composer before reporting startup ready', async () => {
+    const composer = terminalSnapshot('› Ask Codex to do anything', 'idle', 'codex');
+    const dialog = terminalSnapshot('Cannot use the background server\n  1. Run without daemon this time\n› 2. Cancel', 'idle', 'codex');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot)
+      .mockReturnValueOnce(composer)
+      .mockReturnValueOnce(composer)
+      .mockReturnValue(dialog);
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 100, intervalMs: 1,
+    }])).toMatchObject({ ok: false, timedOut: false, blocked: { kind: 'first-run-dialog' } });
+  });
+
   it('reports Codex update prompts as blockers instead of ready', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
@@ -4414,7 +4426,12 @@ describe('runpane IPC handlers', () => {
             readyTimeoutMs: 100,
             panes: [{ name: `${toolKind}-${inputCase.name}`, tool }],
           }]);
-          await vi.runAllTimersAsync();
+          let completed = false;
+          void resultPromise.then(() => { completed = true; }, () => { completed = true; });
+          await vi.waitFor(async () => {
+            await vi.runAllTimersAsync();
+            expect(completed).toBe(true);
+          }, { interval: 1 });
           // SAFETY: The panes:create handler resolves to a result object exposing the per-pane `items` array read below.
           const result = await resultPromise as { items: Array<{ ok?: boolean; initialInput?: unknown }> };
           // SAFETY: createPanel was invoked for a terminal panel, so the captured initialState is the terminal customState.

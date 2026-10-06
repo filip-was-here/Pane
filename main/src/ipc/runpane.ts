@@ -2459,6 +2459,7 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
   let lastScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
   let condition = request.condition ?? defaultWaitCondition(lastScreen.state);
   let requiresFirstEvaluation = true;
+  let readyCandidate = false;
 
   while (requiresFirstEvaluation || Date.now() - startedAt <= timeoutMs) {
     requiresFirstEvaluation = false;
@@ -2467,14 +2468,18 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
     const blocked = detectPanelBlocker(lastScreen.text, lastScreen.state.agentType, panel.id);
     const matched = isWaitConditionMatched(condition, lastScreen, request.contains, blocked);
 
-    if (matched) {
+    // Codex briefly paints a usable-looking composer before its first-run menu.
+    // Confirm CLI readiness on the next poll instead of accepting that boot frame.
+    const requiresConfirmation = condition === 'ready' && lastScreen.state.isCliPanel;
+    if (matched && (!requiresConfirmation || readyCandidate)) {
       return panelWaitResult(panel, condition, true, false, startedAt, lastScreen);
     }
+    readyCandidate = matched;
     if (blocked && condition !== 'text') {
       return panelWaitResult(panel, condition, false, false, startedAt, lastScreen, blocked);
     }
 
-    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), Math.max(timeoutMs - (Date.now() - startedAt), 0)));
   }
 
   return panelWaitResult(panel, condition, false, true, startedAt, lastScreen);
@@ -4361,7 +4366,7 @@ async function waitForWorktreeRemovalByPolling(
     if (!fs.existsSync(worktreePath)) {
       return 'completed';
     }
-    await sleep(Math.min(intervalMs, Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), Math.max(timeoutMs - (Date.now() - startedAt), 0)));
   }
   return fs.existsSync(worktreePath) ? 'timeout' : 'completed';
 }
