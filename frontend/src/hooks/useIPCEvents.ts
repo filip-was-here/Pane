@@ -90,7 +90,7 @@ async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => v
   window.dispatchEvent(new Event('project-changed'));
   window.dispatchEvent(new Event('project-sessions-refresh'));
   // Sessions belong to the host too; adopt the new host's selection.
-  window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { selectionChanged: true } }));
+  window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'runtime-resync', selectionChanged: true } }));
 }
 
 async function resyncRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean, ownsRuntime: () => boolean): Promise<void> {

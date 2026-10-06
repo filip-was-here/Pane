@@ -128,7 +128,13 @@ export function OrchestrationSessionNav({
       const detail = event instanceof CustomEvent
         ? event.detail as { kind?: string; selectionChanged?: boolean }
         : undefined;
-      const adoptServerSelection = detail?.kind === 'selected' || detail?.selectionChanged === true;
+      // Reconnection snapshots can still contain the selection preceding a failed click.
+      // A new host clears selectionError during invalidation; explicit selection events
+      // remain authoritative on the current host.
+      const retainFailedIntent = detail?.kind === 'runtime-resync'
+        && useOrchestrationSessionStore.getState().selectionError !== null;
+      const adoptServerSelection = !retainFailedIntent
+        && (detail?.kind === 'selected' || detail?.selectionChanged === true);
       void refresh({ adoptServerSelection });
     };
     window.addEventListener('orchestration-sessions-changed', handleSessionsChanged);

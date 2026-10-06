@@ -275,3 +275,57 @@ for (const source of ['initial', 'resync']) {
     });
   }
 }
+
+test('same-host reconnect retains failed Session intent and retry; explicit selection remains adoptable', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?runtime-events');
+  await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
+  await resolve(page, 'select', 'b', 'Disconnected B');
+  const tile = page.locator('[data-session-tile="b"]');
+  await expect(tile.getByRole('alert')).toContainText('Disconnected B');
+  await tile.getByRole('button', { name: 'Retry', exact: true }).click();
+  await resolve(page, 'select', 'b', 'Disconnected B');
+  await expect(tile.getByRole('alert')).toContainText('Disconnected B');
+  await page.evaluate(() => window.selectionTest.emit('resync'));
+  await expect.poll(() => page.evaluate(() => window.selectionTest.runtimeRefreshes())).toBe(1);
+  await resolve(page, 'list', 'a');
+  await expect(page).toHaveTitle(/Session B/);
+  expect(await state(page)).toMatchObject({ session: 'b', route: 'pane-chat' });
+  await expect(tile.getByRole('alert')).toContainText('Disconnected B');
+  await tile.getByRole('button', { name: 'Retry', exact: true }).click();
+  await resolve(page, 'select', 'b');
+  await expect(page.getByRole('status').filter({ hasText: 'Opening Session B' })).toBeVisible();
+  while (await page.evaluate(() => window.selectionTest.pending().some(request => request.kind === 'get' && request.id === 'b'))) {
+    await resolve(page, 'get', 'b');
+  }
+  await expect(tile.locator('.pane-chat-shell')).toBeVisible();
+  await expect(tile.getByRole('alert')).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
+  await resolve(page, 'list', 'a');
+  await expect(page).toHaveTitle(/Session A/);
+});
+
+test('a different host adopts its Session selection after failed local intent', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?runtime-events');
+  await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
+  await resolve(page, 'select', 'b', 'Disconnected B');
+  await expect(page.locator('[data-session-tile="b"]').getByRole('alert')).toContainText('Disconnected B');
+  await page.evaluate(() => window.selectionTest.emit('host'));
+  await resolve(page, 'expanded', 'host');
+  await expect.poll(() => page.evaluate(() => window.selectionTest.runtimeRefreshes())).toBe(1);
+  await resolve(page, 'list', 'a');
+  expect(await state(page)).toMatchObject({ session: 'a' });
+  await expect(page.getByRole('button', { name: 'Open Session Session A', exact: true }).locator('..')).toHaveClass(/bg-surface-selected/);
+});
+
+test('explicit external selection remains authoritative while local Session selection has failed', async ({ page }) => {
+  await page.goto('/renderer-tests/selection.html?runtime-events');
+  await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
+  await resolve(page, 'select', 'b', 'Disconnected B');
+  await expect(page.locator('[data-session-tile="b"]').getByRole('alert')).toContainText('Disconnected B');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
+  await resolve(page, 'list', 'a');
+  await expect(page).toHaveTitle(/Session A/);
+  expect(await state(page)).toMatchObject({ session: 'a', route: 'pane-chat' });
+  await expect(page.locator('[data-session-tile="a"]').getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'Opening Session A' })).toBeVisible();
+});
