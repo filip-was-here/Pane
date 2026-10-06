@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { ipcMain, protocol, shell } from 'electron';
+import { ipcMain, protocol, shell, type WebContents } from 'electron';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
 import { filePreviewKind } from '../../../shared/utils/filePreview';
 import { listArchive, listSqlite } from './filePreviewListing';
@@ -11,12 +11,30 @@ import { revealInFileManager } from '../utils/revealInFileManager';
 const requestSchema = boundary.object({ sessionId: boundary.string, filePath: boundary.string });
 const pathSchema = boundary.object({ success: boundary.literal(true), path: boundary.string, url: boundary.string });
 
+type PreviewHandler = (
+  event: { sender: Pick<WebContents, 'id' | 'isDestroyed' | 'once'> },
+  ...args: PaneCommandValue[]
+) => PaneCommandValue | Promise<PaneCommandValue>;
+
+/** Electron registration and host-state boundary; file validation/streaming stay real. */
+export interface MediaPreviewRuntime {
+  handleIpc(channel: string, handler: PreviewHandler): void;
+  handleProtocol(handler: (request: Request) => Promise<Response>): void;
+  isRemote(): boolean;
+}
+
+const electronRuntime: MediaPreviewRuntime = {
+  handleIpc: (channel, handler) => ipcMain.handle(channel, handler),
+  handleProtocol: handler => protocol.handle('pane-media', handler),
+  isRemote: () => remotePaneClientController.getConnectionState().mode === 'remote',
+};
+
 /** Capabilities are local, scoped to the issuing renderer, and revoked on tab close. */
-export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void {
+export function registerMediaPreview(commandRegistry: PaneCommandRegistry, runtime: MediaPreviewRuntime = electronRuntime): void {
   const grants = new Map<string, { owner: number; sessionId: string; filePath: string }>();
   const owners = new Set<number>();
   const requireLocal = () => {
-    if (remotePaneClientController.getConnectionState().mode === 'remote') {
+    if (runtime.isRemote()) {
       throw new Error('File preview is only available on the local host');
     }
   };
@@ -28,7 +46,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
     return result;
   };
 
-  ipcMain.handle('file:preview-url', async (event, raw: PaneCommandValue) => {
+  runtime.handleIpc('file:preview-url', async (event, raw: PaneCommandValue) => {
     const request = decodeBoundary(raw, requestSchema);
     if (!filePreviewKind(request.filePath)) throw new Error('No preview for this file type');
     await resolve(request);
@@ -45,12 +63,13 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
     }
     return `pane-media://preview/${token}`;
   });
-  ipcMain.handle('file:release-preview', (event, rawUrl: PaneCommandValue) => {
+  runtime.handleIpc('file:release-preview', (event, rawUrl: PaneCommandValue) => {
     const url = decodeBoundary(rawUrl, boundary.string);
     const token = url.replace('pane-media://preview/', '');
     if (grants.get(token)?.owner === event.sender.id) grants.delete(token);
+    return undefined;
   });
-  ipcMain.handle('file:preview-list', async (_event, raw: PaneCommandValue) => {
+  runtime.handleIpc('file:preview-list', async (_event, raw: PaneCommandValue) => {
     const request = decodeBoundary(raw, requestSchema);
     const kind = filePreviewKind(request.filePath);
     const file = await resolve(request);
@@ -58,7 +77,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
     if (kind === 'sqlite') return listSqlite(file.path);
     throw new Error('No listing for this file type');
   });
-  ipcMain.handle('file:preview-action', async (_event, raw: PaneCommandValue, rawAction: PaneCommandValue) => {
+  runtime.handleIpc('file:preview-action', async (_event, raw: PaneCommandValue, rawAction: PaneCommandValue) => {
     const action = decodeBoundary(rawAction, boundary.enumeration('open', 'reveal'));
     const file = await resolve(decodeBoundary(raw, requestSchema));
     if (action === 'open') {
@@ -68,7 +87,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
       await revealInFileManager(file.path);
     }
   });
-  protocol.handle('pane-media', async request => {
+  runtime.handleProtocol(async request => {
     try {
       if (request.method !== 'GET' && request.method !== 'HEAD') return new Response(null, { status: 405 });
       const url = new URL(request.url);

@@ -125,7 +125,7 @@ pnpm test:ci:minimal
   `OPENROUTER_API_KEY` set, one main test fails (#721). Unset it for the run.
 - Playwright tests live in `tests/*.spec.ts`. Install the browser once with
   `pnpm exec playwright install chromium`. `pnpm test:ci:minimal` runs the suite
-  CI runs: smoke, health check, accessibility and settings.
+  CI runs: smoke, health check, accessibility, settings, remote sidebar and file-preview lifecycle regressions.
 - The tests load the renderer from Vite in Chromium, with a mocked Electron API
   (`tests/electronApiMock.ts`). To start Vite, Playwright runs `pnpm electron-dev`
   on port `4521`, which also opens an Electron window against your data
@@ -135,6 +135,10 @@ pnpm test:ci:minimal
   ```bash
   PANE_DIR=~/.pane_test PLAYWRIGHT_PORT=4522 pnpm test -- tests/smoke.spec.ts
   ```
+- File editor/preview lifecycle regressions can also run without a dev app or
+  daemon: `pnpm exec playwright test -c playwright.file-preview.config.ts`.
+  They mount the real components with controlled IPC and replace only Monaco's
+  UI adapter, so deferred reads, autosave and preview cleanup execute normally.
 - Add Playwright tests for user-visible flows, and mock external services
   where you can.
 
