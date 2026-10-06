@@ -59,6 +59,7 @@ from .local_control import (
     run_sessions_overview,
     run_sessions_set_agent,
     run_sessions_update,
+    run_sessions_pin,
     run_watch,
     run_workspace_state,
 )
@@ -1156,6 +1157,8 @@ COMMAND_HANDLERS: Dict[str, Callable[[ParsedArgs, WrapperTelemetryContext], int]
     "sessions create": lambda parsed, context: run_sessions_create(parsed),
     "sessions get": lambda parsed, context: run_sessions_get(parsed),
     "sessions update": lambda parsed, context: run_sessions_update(parsed),
+    "sessions pin": lambda parsed, context: run_sessions_pin(parsed, True),
+    "sessions unpin": lambda parsed, context: run_sessions_pin(parsed, False),
     "sessions set-agent": lambda parsed, context: run_sessions_set_agent(parsed),
     "sessions associate": lambda parsed, context: run_sessions_associate(parsed),
     "sessions detach": lambda parsed, context: run_sessions_detach(parsed),

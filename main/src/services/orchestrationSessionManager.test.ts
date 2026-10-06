@@ -274,6 +274,19 @@ afterEach(() => {
 });
 
 describe('OrchestrationSessionManager', () => {
+  it('creates a pinned Session and persists declarative pin updates', async () => {
+    const fixture = createFixture();
+    const input = { name: 'Pinned coordinator', isPinned: true };
+    const created = await fixture.manager.create(input);
+    const selector = { sessionId: created.session.id };
+    expect((await fixture.manager.get(selector)).isPinned).toBe(true);
+    await fixture.manager.update(selector, { isPinned: false });
+    expect((await fixture.manager.get(selector)).isPinned).toBe(false);
+    await fixture.manager.update(selector, { isPinned: true });
+    await fixture.manager.update(selector, { isPinned: true });
+    expect((await fixture.manager.get(selector)).isPinned).toBe(true);
+  });
+
   it('reopens WSL Sessions with Linux paths, native commands, and durable distro choice', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.spyOn(wslUtils, 'validateWSLAvailable').mockResolvedValue(null);

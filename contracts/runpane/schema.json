@@ -514,6 +514,8 @@
         "sessions create",
         "sessions get",
         "sessions update",
+        "sessions pin",
+        "sessions unpin",
         "sessions set-agent",
         "sessions associate",
         "sessions detach",
@@ -762,6 +764,12 @@
           "$ref": "#/$defs/helpLines"
         },
         "lock list": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions pin": {
+          "$ref": "#/$defs/helpLines"
+        },
+        "sessions unpin": {
           "$ref": "#/$defs/helpLines"
         }
       },

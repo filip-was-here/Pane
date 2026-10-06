@@ -90,6 +90,7 @@ interface SessionCreatePayload {
   runtime?: 'windows' | 'wsl';
   wslDistribution?: string;
   name: string;
+  isPinned?: boolean;
   agent?: RunpaneAgent;
   goal?: string;
   context?: string;
@@ -1862,6 +1863,13 @@ export async function runSessionsUpdate(parsed: ParsedArgs): Promise<number> {
   return printSessionResult(result, parsed.json, 'Updated');
 }
 
+export async function runSessionsPin(parsed: ParsedArgs, pinned: boolean): Promise<number> {
+  const result = await invokeDaemon('runpane:sessions:update', [{
+    selector: sessionSelectorFromParsed(parsed), input: { isPinned: pinned },
+  }], runpaneSessionResultSchema, { paneDir: parsed.paneDir });
+  return printSessionResult(result, parsed.json, pinned ? 'Pinned' : 'Unpinned');
+}
+
 export async function runSessionsSetAgent(parsed: ParsedArgs): Promise<number> {
   const selector = sessionSelectorFromParsed(parsed);
   if (!parsed.agent) throw new Error('runpane sessions set-agent requires --agent.');
@@ -2024,6 +2032,7 @@ function parseSessionCreatePayload(value: JsonValue): SessionCreatePayload {
     runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
     wslDistribution: boundary.optional(boundary.nonEmptyString),
     name: boundary.nonEmptyString,
+    isPinned: boundary.optional(boundary.boolean),
     agent: boundary.optional(boundary.enumeration('codex', 'claude', 'cursor')),
   launchCommand: boundary.optional(boundary.string),
   profile: boundary.optional(boundary.string),

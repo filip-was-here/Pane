@@ -3772,6 +3772,8 @@ async function checkCliEventSubscriptions() {
 }
 
 async function checkSessionChildPinDefaults() {
+  const { helpText } = require(path.join(rootDir, 'packages/runpane/dist/commands.js'));
+  assert.match(helpText('panes create'), /Session.*unpinned/);
   const daemonClient = require(path.join(rootDir, 'packages/runpane/dist/daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages/runpane/dist/commands.js'));
   const { runPanesCreate } = require(path.join(rootDir, 'packages/runpane/dist/localControl.js'));
@@ -3811,13 +3813,35 @@ print(json.dumps([build_pane_create_request(parse_args(base + extra))["panes"][0
   }
 }
 
+async function checkSessionPinCommands() {
+  const paneDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runpane-session-pins-'));
+  try {
+    for (const runtime of ['npm', 'pip']) {
+      for (const action of ['pin', 'pin', 'unpin', 'unpin']) {
+        const args = ['sessions', action, '--session', 'coordinator', '--json'];
+        const output = await withFakeDaemon(paneDir, frame => {
+          assert.strictEqual(frame.channel, 'runpane:sessions:update');
+          assert.deepStrictEqual(frame.args, [{ selector: { sessionId: 'coordinator' }, input: { isPinned: action === 'pin' } }]);
+          return { result: { ok: true, session: { id: 'coordinator', name: 'Coordinator', isPinned: action === 'pin', agent: 'codex',
+            internalSessionId: 'owner', panelIds: { claude: 'claude-panel', codex: 'codex-panel', cursor: 'cursor-panel' },
+            goal: '', context: '', decisions: [], blockers: [], nextAction: '', evidence: [], outputs: [], associations: [],
+            activity: [], revision: 1, createdAt: '2026-10-06T03:00:00Z', updatedAt: '2026-10-06T03:00:00Z' } } };
+        }, () => runControlProcess(runtime, runtime === 'npm' ? args : ['-m', 'runpane', ...args], paneDir));
+        assert.strictEqual(JSON.parse(output).session.isPinned, action === 'pin');
+      }
+    }
+  } finally {
+    fs.rmSync(paneDir, { recursive: true, force: true });
+  }
+}
+
 async function checkSessionRuntime() {
   const daemonClient = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'daemonClient.js'));
   const { parseRunpaneArgs } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'commands.js'));
   const { runSessionsCreate } = require(path.join(rootDir, 'packages', 'runpane', 'dist', 'localControl.js'));
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-runtime-contract-'));
   const file = path.join(directory, 'session.json');
-  const input = { name: 'WSL planning', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04' };
+  const input = { name: 'WSL planning', runtime: 'wsl', wslDistribution: 'Ubuntu-24.04', isPinned: true };
   fs.writeFileSync(file, JSON.stringify(input));
   const originalInvoke = daemonClient.invokeDaemon;
   const originalLog = console.log;
@@ -3832,6 +3856,7 @@ async function checkSessionRuntime() {
     assert.strictEqual(await runSessionsCreate(parseRunpaneArgs(['sessions', 'create', '--from-json', file, '--json'])), 0);
     assert.strictEqual(received.runtime, 'wsl');
     assert.strictEqual(received.wslDistribution, 'Ubuntu-24.04');
+    assert.strictEqual(received.isPinned, true);
   } finally {
     daemonClient.invokeDaemon = originalInvoke;
     console.log = originalLog;
@@ -4015,6 +4040,7 @@ async function runChecks() {
   await checkLockParity();
   await checkOverviewReportsAndLocks();
   await checkSessionRuntime();
+  await checkSessionPinCommands();
   await checkPanesAdoptCliParity();
   checkContractDocListsEveryCommand();
   await checkAgentTemplateParity();
