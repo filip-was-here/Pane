@@ -9,7 +9,7 @@ is the reference for details.
 - **Pane (session):** one feature or PR workspace. It normally owns one
   Pane-managed git worktree and branch.
 - **Panel:** a tab inside a pane. Types are `terminal`, `diff`, `explorer`,
-  `editor`, `logs`, `dashboard`, `setup-tasks` and `browser`
+  `editor`, `logs`, `dashboard`, `setup-tasks`, `browser` and `notes`
   (`shared/types/panels.ts`). Agent CLIs run in `terminal` panels.
 
 ## Processes
@@ -94,6 +94,45 @@ Agent status (working, idle, blocked) is derived in
   `<git-common-dir>/pane-archive-cleanup`, separate from legacy trash sweeps.
 - Per-repo setup, run and archive scripts come from `pane.json` and friends:
   [CONFIG_FILES.md](CONFIG_FILES.md).
+
+## Notes
+
+Local Notes panels use `main/src/services/notes.ts` through `main/src/ipc/notes.ts`.
+Canonical documents live in `<PANE_DIR>/notes/notes.json`, outside disposable
+worktrees. A revision check rejects stale edits; writes atomically replace the
+store. Promotion changes the canonical scope and retains references to earlier
+scopes. The Session view derives associated project notebooks from existing Pane
+associations. Renderer recovery drafts retain edits when an autosave fails. The borderless
+editor inserts text/drawing blocks through inline plus or slash menus; the
+settings cog holds promotion and deletion actions. Agent visibility is automatic
+within scope, with no sharing controls in the editor. Restoring an archived
+Pane refreshes its derived context from current project notes.
+
+`noteExports.ts` derives marked instruction sections and drawing assets from saved
+documents. Excalidraw scenes remain editable JSON, with PNG previews and readable
+labels in agent-facing Markdown. Global destinations are Claude's user
+`CLAUDE.md`, Codex's user `AGENTS.md` (or existing override), and Cursor's local
+`rules/pane-memories.mdc`. Cursor CLI also receives the generated memory through
+a user `sessionStart` hook (`cursorNoteHook.ts`), preserving existing hooks.
+Scoped content is exported outside repositories to
+`<PANE_DIR>/notes/contexts/<pane-id>.md`. Each new native Pane terminal receives
+its path through `PANE_NOTES_FILE`; the user-level integration tells agents to
+read that file before each turn. Project contexts contain only that project's
+notes plus the current feature; Session contexts contain only Session notes.
+Ordinary saves leave repositories clean. The existing `managedAgentsMd` opt-in
+additionally exports scoped notes into repository `AGENTS.md` and `CLAUDE.md`;
+turning it off removes those memory sections.
+
+Exports preserve symlinks and permissions and replace files atomically. A store
+ownership marker prevents a second Pane data directory from overwriting the
+first directory's user memory. Malformed marker pairs produce a visible error.
+Changing notebooks only reads data. Terminals predating this update need reopening
+to gain the context environment variable. After the first scoped note, start a
+new agent conversation to load the scoped-reading instruction. Global-file changes refresh on Codex's next
+turn, Claude resume, or a new Cursor conversation in the tested CLI versions;
+updating a file alone cannot erase context already read. Notes support native
+macOS, Windows, and Linux installations; WSL agent exports report an unsupported
+destination instead of claiming delivery. There is no cross-machine sync.
 
 ## Subsystems
 

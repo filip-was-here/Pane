@@ -30,7 +30,7 @@ const EMPTY_PANELS: ToolPanel[] = [];
 const SESSION_INSPECTOR_TABS = ['overview', 'files', 'changes'] as const;
 type SessionInspectorTab = typeof SESSION_INSPECTOR_TABS[number];
 /** Panels that always live on the Session stage as tabs; Files docks in the inspector. */
-const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser']);
+const STAGE_PANEL_TYPES = new Set<ToolPanel['type']>(['editor', 'browser', 'notes']);
 
 /** A terminal started with a command (an agent or a custom command) is always a tab. */
 function launchesCommand(panel: ToolPanel): boolean {
@@ -230,6 +230,15 @@ export function SessionWorkspacePanels({
   const addTool = useCallback(async (tool: SessionToolSpec, groupId?: string) => {
     setError(null);
     try {
+      if (tool.type === 'notes') {
+        const state = usePanelStore.getState();
+        const current = state.layouts[sessionId];
+        const existing = state.panels[sessionId]?.find(panel => panel.type === 'notes');
+        if (current && existing && layoutPanelIds(current).has(existing.id)) {
+          applyLayout(activatePanelInLayout(current, existing.id));
+          return;
+        }
+      }
       let initialState: { customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> } | undefined;
       if (tool.initialCommand) {
         const customState: Pick<TerminalPanelState, 'initialCommand' | 'customResume'> = { initialCommand: tool.initialCommand };
