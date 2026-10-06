@@ -1952,8 +1952,8 @@ async function submitCreateInitialInput(
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       strategy: 'argument',
       sequenceName: 'argument',
-      verifiedSubmitted: delivered,
-      delivery: delivered
+      verifiedSubmitted: delivered && readiness?.ok === true,
+      delivery: delivered && readiness?.ok === true
         ? await argumentDelivery(panel, tool, cwd, sentAt)
         : { state: 'unknown', evidence: 'argv' },
       sentAt,
@@ -1977,6 +1977,7 @@ async function submitCreateInitialInput(
     return {
       delivered: false,
       submitted: false,
+      verifiedSubmitted: false,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       error: { message: 'The agent is not ready yet, so initial input is queued and sent once it is.' },
       nextCommand: readiness.nextCommand ?? panelWaitCommand(panel.id),
@@ -2535,6 +2536,29 @@ function detectPanelBlocker(
   panelId: string,
 ): RunpanePanelBlockedState | undefined {
   if (!text) return undefined;
+
+  const daemonChoice = text.match(/^\s*[›❯>]?\s*(\d+)\.\s*Run without daemon this time/im);
+  if (daemonChoice && /cannot use the background server/i.test(text)) {
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: `runpane panels input --panel ${panelId} --keys ${daemonChoice[1]},enter --yes --json`,
+    };
+  }
+  const trustChoice = text.match(/^\s*([›❯>])?\s*(?:(\d+)\.\s*)?(?:Trust and continue|Yes, I trust this folder)\s*$/im);
+  if (trustChoice && /(?:trust this folder|folder access|quick safety check)/i.test(text)) {
+    // Claude's unnumbered menu defaults to No. Never suggest Enter on that option.
+    const keys = trustChoice[2] ? `${trustChoice[2]},enter`
+      : trustChoice[1] ? 'enter'
+      : /^[ \t]*[›❯>][ \t]*No, exit[ \t]*$/im.test(text) ? 'down,enter' : undefined;
+    return {
+      kind: 'first-run-dialog',
+      message: text.trim(),
+      suggestedCommand: keys
+        ? `runpane panels input --panel ${panelId} --keys ${keys} --yes --json`
+        : panelScreenCommand(panelId),
+    };
+  }
 
   if (
     (agentType === 'codex' || /codex/i.test(text)) &&

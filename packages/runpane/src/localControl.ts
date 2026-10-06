@@ -720,7 +720,7 @@ interface Delivery {
 }
 
 interface PanelBlockedState {
-  kind: 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'composer-unknown' | 'unknown';
+  kind: 'first-run-dialog' | 'codex-update' | 'agent-prompt' | 'submission_unverified' | 'composer-unknown' | 'unknown';
   message: string;
   suggestedCommand?: string;
 }
@@ -958,7 +958,7 @@ const paneSummarySchema: BoundarySchema<PaneSummary> = boundary.object({
   ownership: boundary.enumeration('pane', 'external'),
 });
 const panelBlockedSchema: BoundarySchema<PanelBlockedState> = boundary.object({
-  kind: boundary.enumeration('codex-update', 'agent-prompt', 'submission_unverified', 'composer-unknown', 'unknown'),
+  kind: boundary.enumeration('first-run-dialog', 'codex-update', 'agent-prompt', 'submission_unverified', 'composer-unknown', 'unknown'),
   message: boundary.string,
   suggestedCommand: boundary.optional(boundary.string),
 });

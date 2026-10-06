@@ -2953,6 +2953,52 @@ describe('runpane IPC handlers', () => {
     });
   });
 
+  it('reports a first-run trust dialog and leaves the launch prompt unverified', async () => {
+    const panel = {
+      ...terminalPanel,
+      state: { ...terminalPanel.state, customState: { agentType: 'codex', initialInputSentAt: '2026-01-01T00:02:00.000Z' } },
+    };
+    vi.mocked(panelManager.createPanel).mockResolvedValue(panel);
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'Trust this folder?\n› 1. Trust and continue\n  2. Quit\n', 'idle', 'codex',
+    ));
+    const result = await createRegistry(createServices()).invoke('runpane:panes:create', [{
+      repo: { id: project.id }, waitReady: true, readyTimeoutMs: 100,
+      panes: [{ name: 'issue-946', tool: { agent: 'codex', initialInput: 'Read prompt.md' } }],
+    }]);
+    expect(result).toMatchObject({ items: [{
+      readiness: { ok: false, blocked: {
+        kind: 'first-run-dialog', message: expect.stringContaining('Trust this folder?'),
+        suggestedCommand: `runpane panels input --panel ${panel.id} --keys 1,enter --yes --json`,
+      } },
+      initialInput: { verifiedSubmitted: false, delivery: { state: 'unknown' } },
+    }] });
+    expect(terminalPanelManager.writeToTerminal).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['claude', 'Quick safety check\nDo you trust this folder?\n❯ 1. Yes, I trust this folder\n  2. No, exit', '1'],
+    ['codex', 'Cannot use the background server\n  1. Retry\n› 2. Run without daemon this time\n  3. Exit', '2'],
+  ] as const)('identifies %s first-run choices from the live screen', async (agent, text, key) => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', agent));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
+      .toMatchObject({ ok: false, timedOut: false, blocked: {
+        kind: 'first-run-dialog', message: text,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys ${key},enter --yes --json`,
+      } });
+  });
+
+  it('selects the affirmative Claude trust option when No is selected by default', async () => {
+    const text = 'Accessing workspace:\n/tmp/new-repo\nQuick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\nEnter to confirm · Esc to cancel';
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(text, 'idle', 'claude'));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{ panelId: terminalPanel.id, timeoutMs: 10 }]))
+      .toMatchObject({ ok: false, blocked: {
+        kind: 'first-run-dialog', message: text,
+        suggestedCommand: `runpane panels input --panel ${terminalPanel.id} --keys down,enter --yes --json`,
+      } });
+  });
+
   it('reports Codex update prompts as blockers instead of ready', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
@@ -3003,7 +3049,7 @@ describe('runpane IPC handlers', () => {
       condition: 'ready',
       matched: false,
       timedOut: false,
-      blocked: { kind: 'agent-prompt' },
+      blocked: { kind: 'first-run-dialog' },
     });
   });
 
