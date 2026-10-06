@@ -1,4 +1,4 @@
-import { open, mkdtemp, rm, stat } from 'fs/promises';
+import { open, mkdtemp, rm, stat, realpath } from 'fs/promises';
 import { createWriteStream } from 'fs';
 import { tmpdir } from 'os';
 import { extname, join } from 'path';
@@ -79,14 +79,18 @@ export async function listArchive(filePath: string): Promise<FilePreviewListing>
 
 /** Inspect a bounded temporary snapshot so SQLite can never create source sidecars. */
 export async function listSqlite(filePath: string, deadlineMs = 3000): Promise<FilePreviewListing> {
-  const source = await open(filePath, 'r');
+  // Recovery files belong beside the target, not beside a symlink alias.
+  const sourcePath = await realpath(filePath);
+  const source = await open(sourcePath, 'r');
   let directory: string | undefined;
   try {
     const before = await source.stat();
     if (!before.isFile() || before.size > 32 * 1024 * 1024) throw new Error('SQLite preview is limited to 32 MiB.');
+    // A hard link has no canonical owner path for locating its recovery files.
+    if (before.nlink > 1) throw new Error('Cannot preview a database with hard links. Open a closed database copy.');
     const checkRecoveryFiles = async () => {
       for (const [suffix, label] of [['-wal', 'active WAL'], ['-journal', 'rollback journal']]) {
-        const sidecar = await stat(`${filePath}${suffix}`).catch((error: NodeJS.ErrnoException) => {
+        const sidecar = await stat(`${sourcePath}${suffix}`).catch((error: NodeJS.ErrnoException) => {
           if (error.code !== 'ENOENT') throw error;
           return null;
         });
@@ -102,7 +106,7 @@ export async function listSqlite(filePath: string, deadlineMs = 3000): Promise<F
     await pipeline(source.createReadStream({ start: 0, end: before.size - 1, autoClose: false }), createWriteStream(snapshot, { flags: 'wx', mode: 0o600 }));
     const after = await source.stat();
     await checkRecoveryFiles();
-    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('Database changed during preview. Try a closed copy.');
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.nlink !== after.nlink) throw new Error('Database changed during preview. Try a closed copy.');
     return await inspectSqliteSnapshot(snapshot, deadlineMs);
   } finally {
     await source.close();

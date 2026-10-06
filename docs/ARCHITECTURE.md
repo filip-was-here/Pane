@@ -85,7 +85,9 @@ headers without extraction, with at most 1,000 entries. ZIP64/split ZIP and
 compressed TAR are unsupported; extended TAR names are not expanded. SQLite
 lists tables/views from a bounded temporary copy (32 MiB), opened read-only and
 removed afterward. Nonempty WAL and rollback journals are refused before and
-after copying; no source sidecars are created. Native schema inspection runs in
+after copying beside the canonical target; hard-linked databases are refused
+because their recovery-file owner path is ambiguous. No source sidecars are
+created. Native schema inspection runs in
 a child process with a 3-second deadline, a 1 MiB output cap and at most 1,000
 displayed entries. No table data queries are executed.
 

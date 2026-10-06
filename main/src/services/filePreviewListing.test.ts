@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, readFile, readdir, rm, truncate } from 'fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, rm, truncate, symlink, link } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3-multiple-ciphers';
@@ -99,24 +99,43 @@ it.each(['bad.zip', 'bad.tar', 'bad.sqlite'])('fails clearly for malformed %s', 
   await expect(name.endsWith('sqlite') ? listSqlite(path) : listArchive(path)).rejects.toThrow();
 });
 
-it('refuses a spilled rollback transaction without changing the database or journal', async () => {
+it.each(['direct', 'symlink', 'hardlink'] as const)('refuses a spilled rollback transaction via %s without changing source files', async (access, context) => {
+  if (access === 'symlink' && process.platform === 'win32') context.skip();
   const path = join(directory, 'rollback.sqlite');
   const writer = new Database(path);
   try {
     writer.pragma('journal_mode = DELETE');
     writer.pragma('cache_size = 2');
-    for (let index = 0; index < 100; index++) writer.exec(`CREATE TABLE committed_${index} (value TEXT)`);
+    writer.transaction(() => {
+      for (let index = 0; index < 100; index++) writer.exec(`CREATE TABLE committed_${index} (value TEXT)`);
+    })();
+    const alias = join(directory, 'alias.sqlite');
+    if (access === 'symlink') await symlink(path, alias);
+    if (access === 'hardlink') await link(path, alias);
     writer.exec('BEGIN IMMEDIATE');
     for (let index = 0; index < 100; index++) writer.exec(`ALTER TABLE committed_${index} RENAME TO temporary_${index}`);
     const before = await readFile(path);
     const journal = await readFile(`${path}-journal`);
     const names = await readdir(directory);
     expect(journal.length).toBeGreaterThan(0);
-    await expect(listSqlite(path)).rejects.toThrow('rollback journal');
+    await expect(listSqlite(access === 'direct' ? path : alias)).rejects.toThrow(access === 'hardlink' ? 'hard links' : 'rollback journal');
     expect(await readFile(path)).toEqual(before);
     expect(await readFile(`${path}-journal`)).toEqual(journal);
     expect(await readdir(directory)).toEqual(names);
   } finally { writer.close(); }
+});
+
+it.skipIf(process.platform === 'win32')('checks WAL beside a symlink target and permits a closed target', async () => {
+  const path = join(directory, 'target.sqlite');
+  const alias = join(directory, 'alias.sqlite');
+  const writer = new Database(path); writer.exec('CREATE TABLE items (name TEXT)'); writer.close();
+  await symlink(path, alias);
+  expect((await listSqlite(alias)).rows).toEqual([['items', 'table']]);
+  await writeFile(`${path}-wal`, 'nonempty WAL');
+  const before = await readFile(path);
+  await expect(listSqlite(alias)).rejects.toThrow('active WAL');
+  expect(await readFile(path)).toEqual(before);
+  expect(await readFile(`${path}-wal`, 'utf8')).toBe('nonempty WAL');
 });
 
 it('keeps the event loop responsive and enforces a deadline while parsing a wide SQLite schema', async () => {
