@@ -3,8 +3,7 @@
  * (Monaco, markdown/notebook preview, image, PDF or media) for a center `editor`
  * tab. The tree that opens files lives in the Files inspector (FileEditor).
  */
-import { useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
-import Editor from '@monaco-editor/react';
+import { lazy, Suspense, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import type * as monaco from 'monaco-editor';
 import { MonacoErrorBoundary } from '../../MonacoErrorBoundary';
 import { isLightTheme, useTheme } from '../../../contexts/ThemeContext';
@@ -19,6 +18,8 @@ import { restoreEditorPosition, trackEditorPosition, type PositionTracker } from
 import { FileEditorHeader } from './FileEditorHeader';
 import { MediaFilePreview, FilePreviewNotice } from './MediaFilePreview';
 import { DocumentFilePreview } from './DocumentFilePreview';
+
+const Editor = lazy(() => import('@monaco-editor/react'));
 
 export interface FileEditorViewProps {
   sessionId: string;
@@ -308,20 +309,22 @@ export function FileEditorView({
           </div>
         ) : (
           <MonacoErrorBoundary>
-            <Editor
-              theme={isDarkMode ? 'vs-dark' : 'light'}
-              value={fileContent}
-              onChange={handleEditorChange}
-              onMount={handleEditorMount}
-              options={{
-                readOnly: selectedFile.path !== filePath,
-                minimap: { enabled: true },
-                fontSize: 14,
-                wordWrap: 'on',
-                automaticLayout: true,
-              }}
-              language={getLanguageFromPath(selectedFile.path)}
-            />
+            <Suspense fallback={<p role="status" className="p-6 text-text-secondary">Loading source editor...</p>}>
+              <Editor
+                theme={isDarkMode ? 'vs-dark' : 'light'}
+                value={fileContent}
+                onChange={handleEditorChange}
+                onMount={handleEditorMount}
+                options={{
+                  readOnly: selectedFile.path !== filePath,
+                  minimap: { enabled: true },
+                  fontSize: 14,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                }}
+                language={getLanguageFromPath(selectedFile.path)}
+              />
+            </Suspense>
           </MonacoErrorBoundary>
         )}
       </div>
