@@ -450,7 +450,7 @@ export class TerminalPanelManager extends EventEmitter {
         : agentType === 'cursor'
           ? this.resolveCursorLaunch(panelId, initialCommand, customState, nextState, shellType)
           : agentType === 'opencode'
-            ? this.resolveOpenCodeLaunch(initialCommand, customState, nextState)
+            ? this.resolveOpenCodeLaunch(initialCommand, customState, nextState, isWSL ? 'bash' : shellType)
           : undefined;
 
     return resolution ?? { commandToRun: initialCommand, customState: nextState, isCliCommand: true };
@@ -460,9 +460,11 @@ export class TerminalPanelManager extends EventEmitter {
     initialCommand: string,
     customState: TerminalPanelState,
     nextState: TerminalPanelState,
+    shellType?: string,
   ): CliLaunchResolution {
     const launch = resolveOpenCodeLaunchCommand({
       baseCommand: initialCommand,
+      shellType,
       persistedSessionId: customState.agentSessionId,
     });
     return {

@@ -47,6 +47,15 @@ describe('OpenCode session ids', () => {
 });
 
 describe('resolveOpenCodeLaunchCommand', () => {
+  it.each(['powershell.exe', 'pwsh', 'cmd.exe'])('preserves absolute Windows executable paths in %s', (shellType) => {
+    const baseCommand = String.raw`C:\Tools\opencode --auto`;
+    expect(resolveOpenCodeLaunchCommand({ baseCommand, persistedSessionId: 'ses_saved', shellType })).toEqual({ commandToRun: `${baseCommand} --session "ses_saved"`, sessionId: 'ses_saved' });
+  });
+
+  it('retains POSIX escape semantics for a Windows-shaped command in bash', () => {
+    expect(() => resolveOpenCodeLaunchCommand({ baseCommand: String.raw`C:\Tools\opencode --auto`, shellType: 'bash' })).toThrow(/unsupported.*wrapper/i);
+  });
+
   it.each(['opencode --prompt hello', 'opencode --prompt=hello'])(
     'rejects startup prompt arguments that would replay on restore: %s', (baseCommand) => {
       expect(() => resolveOpenCodeLaunchCommand({ baseCommand, persistedSessionId: 'ses_saved' }))

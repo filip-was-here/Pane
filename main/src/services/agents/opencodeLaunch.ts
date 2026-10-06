@@ -13,6 +13,7 @@ interface ShellToken {
 
 interface OpenCodeLaunchOptions {
   baseCommand: string;
+  shellType?: string;
   persistedSessionId?: string;
   allocateSessionId?: () => string;
 }
@@ -34,7 +35,7 @@ function isUnsupportedUnquotedShellCharacter(character: string): boolean {
  * Tokenizes only the shell-word features needed to identify argv selectors.
  * Source spans let callers insert a selector without rebuilding the command.
  */
-function scanShellTokens(command: string): ShellToken[] {
+function scanShellTokens(command: string, windowsPaths: boolean): ShellToken[] {
   if (command.length > MAX_COMMAND_LENGTH) {
     throw new Error('OpenCode launch command is too long');
   }
@@ -49,6 +50,7 @@ function scanShellTokens(command: string): ShellToken[] {
     if (index >= command.length) break;
 
     const start = index;
+    const windowsPath = windowsPaths && /^[A-Za-z]:\\/u.test(command.slice(start));
     let value = '';
     let quote: 'single' | 'double' | undefined;
 
@@ -109,6 +111,11 @@ function scanShellTokens(command: string): ShellToken[] {
         continue;
       }
       if (character === '\\') {
+        if (windowsPath) {
+          value += character;
+          index += 1;
+          continue;
+        }
         if (index + 1 >= command.length) {
           throw new Error('OpenCode launch command has a dangling escape');
         }
@@ -153,8 +160,8 @@ export function isValidOpenCodeSessionId(value: string): boolean {
   return OPENCODE_SESSION_ID_PATTERN.test(value);
 }
 
-function scanDirectOpenCodeTokens(command: string): ShellToken[] {
-  const tokens = scanShellTokens(command);
+function scanDirectOpenCodeTokens(command: string, windowsPaths = false): ShellToken[] {
+  const tokens = scanShellTokens(command, windowsPaths);
   const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
   let executableIndex = 0;
   // Shell assignments must start unquoted; env receives ordinary literal argv.
@@ -175,13 +182,14 @@ function scanDirectOpenCodeTokens(command: string): ShellToken[] {
 }
 
 /** Read-only preflight: recognition of an agent inside a wrapper is not safe selector insertion. */
-export function assertDirectOpenCodeLaunchCommand(baseCommand: string): void {
-  scanDirectOpenCodeTokens(baseCommand);
+export function assertDirectOpenCodeLaunchCommand(baseCommand: string, windowsPaths = false): void {
+  scanDirectOpenCodeTokens(baseCommand, windowsPaths);
 }
 
 export function resolveOpenCodeLaunchCommand(options: OpenCodeLaunchOptions): OpenCodeLaunchCommand {
   const { baseCommand } = options;
-  const tokens = scanDirectOpenCodeTokens(baseCommand);
+  const windowsPaths = /^(?:powershell|pwsh|cmd)(?:\.exe)?$/iu.test(options.shellType ?? '');
+  const tokens = scanDirectOpenCodeTokens(baseCommand, windowsPaths);
   const terminatorIndex = tokens.findIndex(({ value }) => value === '--');
   const selectorLimit = terminatorIndex === -1 ? tokens.length : terminatorIndex;
   const commandSessionIds: string[] = [];

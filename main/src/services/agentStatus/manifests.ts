@@ -428,7 +428,12 @@ export const OPENCODE_MANIFEST: AgentManifest = {
       region: 'bottom_non_empty_lines(4)',
       visibleIdle: true,
       contains: ['ctrl+p commands'],
-      lineRegex: [/^\s*╹▀{3,}/u],
+      any: [
+        { lineRegex: [/^\s*╹▀{3,}/u] },
+        // Transparent themes omit the bottom border; the metadata row still
+        // immediately precedes the live footer, separated only by blank rows.
+        { regex: [/(?:^|\n)[^\S\n]*┃[^\n]+\n\s*[^\n]*ctrl\+p commands[^\n]*\s*$/u] },
+      ],
       not: [
         { lineRegex: [/\besc(?: again to)? interrupt\b.*\bctrl\+p commands\b/i] },
         { contains: ['permission required', 'enter confirm'] },

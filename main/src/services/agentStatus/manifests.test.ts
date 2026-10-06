@@ -448,6 +448,12 @@ describe('OPENCODE_MANIFEST', () => {
     expect(r.matchedRuleId).toBe('idle_composer');
   });
 
+  it('recognizes a transparent-theme composer without an opaque bottom border', () => {
+    const r = detectAgentState(OPENCODE_MANIFEST, screen(idleComposer.replace(/╹▀+/u, ' '), 'OpenCode'));
+    expect(r.visibleIdle).toBe(true);
+    expect(r.matchedRuleId).toBe('idle_composer');
+  });
+
   it.each([
     '  ⬝⬝■■■■ esc interrupt                    shift+tab agents  ctrl+p commands',
     '  ■■⬝⬝⬝⬝ esc again to interrupt           shift+tab agents  ctrl+p commands',

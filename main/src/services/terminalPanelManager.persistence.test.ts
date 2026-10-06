@@ -21,6 +21,7 @@ import { getAppDirectory } from '../utils/appDirectory';
 import { sessionWorkspacePath } from './sessionWorkspace';
 import { windowsPathToWSLMount } from '../utils/wslUtils';
 import * as shellPathUtils from '../utils/shellPath';
+import { ShellDetector } from '../utils/shellDetector';
 
 /** In-process stand-in for a ptyHost PTY: output is whatever the test emits. */
 class FakePtyHandle implements PtyHandleLike {
@@ -259,10 +260,10 @@ describe('terminal panel persistence', () => {
     }
   }
 
-function emitOpenCodeIdleFrame(handle: FakePtyHandle): void {
+function emitOpenCodeIdleFrame(handle: FakePtyHandle, transparent = false): void {
   handle.emit('\x1b[2J\x1b[H\x1b]2;OpenCode\x07');
   handle.emit('  ┃\r\n  ┃  Ask anything…\r\n  ┃\r\n  ┃  Build\r\n');
-  handle.emit(`  ╹${'▀'.repeat(44)}\r\n`);
+  handle.emit(transparent ? '                                               \r\n' : `  ╹${'▀'.repeat(44)}\r\n`);
   handle.emit('  [project]         shift+tab agents  ctrl+p commands\r\n');
 }
 
@@ -278,6 +279,23 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle): void {
       agentSessionId: expect.stringMatching(/^ses_[A-Za-z0-9]+$/),
     });
     expect(panel.state.customState?.agentSessionId).toBe(stateAtSpawn?.customState?.agentSessionId);
+  });
+
+  it('uses the selected Windows shell when validating an absolute OpenCode path', async () => {
+    vi.useFakeTimers();
+    const shell = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: 'powershell.exe', name: 'powershell', args: [] });
+    try {
+      const panel = makeOpenCodePanel('opencode-windows-path', { initialCommand: String.raw`C:\Tools\opencode --auto`, agentSessionId: 'ses_WindowsPath' });
+      const { handle } = await startTerminal(panel);
+      handle.emit('PS C:\\> ');
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(handle.written.join('')).toContain(String.raw`C:\Tools\opencode --auto --session "ses_WindowsPath"`);
+      expect(databaseService.getPanel(panel.id)?.state.customState?.agentSessionId).toBe('ses_WindowsPath');
+    } finally {
+      shell.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 
   it.each([
@@ -585,17 +603,17 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle): void {
     expect(first.state.customState?.agentSessionId).not.toBe(second.state.customState?.agentSessionId);
   });
 
-  it('delivers OpenCode initial input once and does not replay it during reconstruction', async () => {
+  it.each([false, true])('delivers OpenCode input once without replay (transparent=%s)', async (transparent) => {
     vi.useFakeTimers();
     try {
-      const panel = makeOpenCodePanel('opencode-prompt-once', {
+      const panel = makeOpenCodePanel(`opencode-prompt-once-${transparent}`, {
         agentSessionId: 'ses_Prompt123',
         initialInput: 'Do not replay me',
       });
       const { manager: first, handle: firstHandle } = await startTerminal(panel);
       firstHandle.emit('$ ');
       await vi.advanceTimersByTimeAsync(500);
-      emitOpenCodeIdleFrame(firstHandle);
+      emitOpenCodeIdleFrame(firstHandle, transparent);
       await vi.advanceTimersByTimeAsync(1000);
       expect(firstHandle.written.filter(write => write === 'Do not replay me')).toHaveLength(1);
       firstHandle.emit('Do not replay me');
@@ -613,7 +631,7 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle): void {
       const secondHandle = ptyHost.latest();
       secondHandle.emit('$ ');
       await vi.advanceTimersByTimeAsync(4000);
-      emitOpenCodeIdleFrame(secondHandle);
+      emitOpenCodeIdleFrame(secondHandle, transparent);
       await vi.advanceTimersByTimeAsync(500);
 
       expect(secondHandle.written.join('')).not.toContain('Do not replay me');

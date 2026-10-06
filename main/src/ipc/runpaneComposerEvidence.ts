@@ -70,9 +70,10 @@ export function assessComposerEvidence(args: {
     // Soft wrapping inserts line breaks inside words; compare prompt content
     // independently of the TUI's current column width.
     if (before === undefined || after === undefined) return 'unknown';
-    const pasteMarker = `[Pasted ~${args.stagedText.trim().split(/\r?\n/u).length} lines]`;
-    const content = (before.includes(pasteMarker) ? pasteMarker : marker).replace(/\s/gu, '');
-    if (!before.replace(/\s/gu, '').includes(content)) return 'unknown';
+    const pasteMarker = `[Pasted ~${args.stagedText.trim().split(/\r?\n/u).length} lines]`.replace(/\s/gu, '');
+    const normalizedBefore = before.replace(/\s/gu, '');
+    const content = normalizedBefore.includes(pasteMarker) ? pasteMarker : marker.replace(/\s/gu, '');
+    if (!normalizedBefore.includes(content)) return 'unknown';
     if (!after.replace(/\s/gu, '').includes(content)) return 'cleared';
     return before === after ? 'staged' : 'unknown';
   }
@@ -94,19 +95,21 @@ export function assessComposerEvidence(args: {
   return 'unknown';
 }
 
-/** OpenCode's live composer ends at its bottom border; earlier turns are not input. */
+/** Scope input to the live footer's textarea, excluding padded agent/model metadata. */
 function openCodeComposer(text: string): string | undefined {
   const lines = text.split(/\r?\n/u);
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    if (!/^\s*╹▀{3,}/u.test(lines[index])) continue;
-    const footer = lines.slice(index + 1).filter(line => line.trim());
-    if (footer.length > 3 || !footer.some(line => line.includes('ctrl+p commands'))) return undefined;
-    let start = index;
-    while (start > 0 && /^\s*┃/u.test(lines[start - 1])) start -= 1;
-    if (start === index) return undefined;
-    return lines.slice(start, index).map(line => line.replace(/^\s*┃\s?/u, '').trimEnd()).join('\n');
-  }
-  return undefined;
+  const footer = lines.map(line => line.includes('ctrl+p commands')).lastIndexOf(true);
+  if (footer < 0 || lines.slice(footer + 1).filter(line => line.trim()).length > 2) return undefined;
+  let end = footer;
+  // Transparent themes render the bottom border entirely as spaces.
+  while (end > 0 && !lines[end - 1].trim()) end -= 1;
+  if (end > 0 && /^\s*╹▀{3,}/u.test(lines[end - 1])) end -= 1;
+  let start = end;
+  while (start > 0 && /^\s*┃/u.test(lines[start - 1])) start -= 1;
+  const rows = lines.slice(start, end).map(line => line.replace(/^\s*┃\s?/u, '').trim());
+  const metadataGap = rows.lastIndexOf('');
+  if (rows[0] !== '' || metadataGap < 1 || metadataGap === rows.length - 1) return undefined;
+  return rows.slice(1, metadataGap).join('\n');
 }
 
 function firstNonEmptyLine(text: string): string | undefined {

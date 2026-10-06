@@ -4778,7 +4778,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
   const declaredAgent = tool.agentType;
   const commandAgent = resolveAgentTypeFromCommand(tool.command);
   if (commandAgent === 'opencode' && (!declaredAgent || declaredAgent === 'opencode')) {
-    assertDirectOpenCodeLaunchCommand(tool.command);
+    assertDirectOpenCodeLaunchCommand(tool.command, environment === 'windows' || (!environment && process.platform === 'win32'));
   }
   if (!declaredAgent) {
     return {
