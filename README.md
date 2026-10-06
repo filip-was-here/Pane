@@ -208,7 +208,7 @@ Integration keys (voice dictation, iPhone notifications) set on one host reach y
 
 Your agent can work across your Macs, Windows PCs, and Linux machines. Read a file on your desktop, run a command on your build machine, or check the agents running on your laptop — from the same terminal.
 
-Workspaces use your own Tailscale login, without SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS certificates in your tailnet, and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other Tailscale users and tagged devices are refused.
+Workspaces use your own Tailscale login, without SSH keys or pairing codes. Install and sign in to Tailscale on both machines, enable HTTPS Certificates in the Tailscale admin console (see [setup](docs/RUNPANE_WORKSPACES.md#turning-it-on)), and keep Pane running on the machine you want to reach. Workspaces are on by default for the normal desktop install; `runpane workspace list` shows which machines are answering. Other Tailscale users and tagged devices are refused.
 
 Use the npm CLI (`npm i -g runpane`); the Python wrapper does not run workspace commands. Replace `devbox` with a machine name from the list:
 
@@ -227,7 +227,9 @@ See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) f
 
 “Continue this on my Windows machine with Codex.” `runpane handoff` starts a fresh agent in a new Pane, using your pushed branch and a note about the task. The note carries the goal, decisions, verified state, and next steps. Live processes and agent session memory stay on the original machine.
 
-Run from the repository you're handing off. Save the same GitHub repository in Pane on the destination, with the receiving agent installed and signed in. Keep Pane running there. Use the npm CLI and a native repository; WSL handoff is not yet supported.
+Run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI and a native repository; WSL handoff is not yet supported.
+
+From a Bash or Zsh terminal (for example, on your Mac):
 
 ```bash
 runpane handoff --template > ~/handoff.md
