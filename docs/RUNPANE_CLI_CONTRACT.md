@@ -122,6 +122,8 @@ runpane sessions list [--json] [--pane-dir <path>]
 runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions update --session <id|name> --from-json <path|-> [--json] [--pane-dir <path>]
+runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions set-agent --session <id|name> --agent <codex|claude|cursor> [--json] [--pane-dir <path>]
 runpane sessions associate --session <id|name> --pane <pane-id> [--json] [--pane-dir <path>]
 runpane sessions detach --session <id|name> [--pane <pane-id>] [--json] [--pane-dir <path>]
@@ -173,7 +175,7 @@ The wrapper must stream Pane stdout/stderr without reformatting because `pane --
 
 `runpane panes cost` reports estimated token costs per Pane for the last 30 days, including per-model breakdowns and cache efficiency; unscoped output includes an Unattributed bucket that reconciles against workspace totals.
 
-`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin; manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.
+`runpane panes create` connects to the running local Pane daemon, resolves the requested saved base repository, creates user-visible Pane sessions backed by Pane-managed worktrees/branches, opens terminal-backed tool tabs, and optionally sends initial input to the started tool. Built-in agent panes and `--source agent` default to background/no-focus unless `--focus` is passed. New Panes are pinned into the UI's favorite/pin set by default, except when the CLI runs inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID`), where child worktrees default to unpinned. Explicit `--pinned` / `--no-pinned` override creation defaults. First Session association clears an existing pin, including an explicit creation pin; use `panes pin` after association to pin a child. This avoids duplicating Session children in the global pinned list. Manual pins applied afterward are preserved. Panes created interactively in the Pane UI are unaffected. Inside a Session orchestrator (`PANE_ORCHESTRATION_SESSION_ID` set), new Panes are associated with that Session automatically; `--no-associate` opts out. A failed association is reported on the item and never undoes the Pane.
 
 For `panes create --wait-ready`, `initialInput.delivery` says where the prompt went: `taken` or `queued` (from the agent's transcript or its screen), `in-composer`, or `unknown` (`argv` means a prompt was routed at launch but acceptance is not yet observed). `initialInput.verifiedSubmitted` is true exactly when it is `taken` or `queued`. Routing input does not by itself verify submission. CLI readiness is confirmed on consecutive polls. Codex also requires a recognized configured model or context footer below its live composer; its provisional startup composer is not ready. Hidden or unrecognized Codex status lines conservatively time out rather than prove readiness. Cursor launch prompts currently remain unknown because no acceptance probe is available. First-run trust and daemon dialogs return blocked.kind=first-run-dialog with the dialog in blocked.message and a suggestedCommand; while readiness is blocked or times out, launch-argument delivery remains unknown and unverified.
 
@@ -212,6 +214,8 @@ A watch releases its pending slot when its client socket or named pipe disconnec
 `sessions get` read one durable named orchestration Session.
 
 `sessions update` update a Session overview from structured JSON.
+
+`sessions pin` and `sessions unpin` set the Session pin star through the existing UI update path. Create JSON accepts `isPinned` (default false); update JSON preserves the pin when the field is omitted.
 
 `sessions set-agent` switch the durable terminal agent for a named Session.
 
@@ -306,9 +310,9 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `agents send`: Send a follow-up message to an agent and confirm it was submitted.
 - `report`: Hand back a worker's structured report: state, PR, head commit, summary, and the question when blocked.
 - `sessions list`: List durable named orchestration Sessions.
-- `sessions create`: Create a durable named orchestration Session and its hidden terminal owner.
+- `sessions create`: Create a durable named orchestration Session and its hidden terminal owner; JSON isPinned sets the pin star (default false).
 - `sessions get`: Read one durable named orchestration Session.
-- `sessions update`: Update a Session overview from structured JSON.
+- `sessions update`: Update a Session overview from structured JSON; isPinned sets the UI pin star.
 - `sessions set-agent`: Switch the durable terminal agent for a named Session.
 - `sessions associate`: Associate a user-visible Pane with a named Session.
 - `sessions detach`: Detach a Pane from a named Session.
@@ -316,6 +320,8 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock acquire`: Acquire a named lock on a resource shared between agents, such as one test account, optionally waiting for it.
 - `lock release`: Release a named lock you hold, or force-release another owner's lock.
 - `lock list`: List held named locks, optionally only one Session's.
+- `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
+- `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
 
 ```bash
 runpane help [command]
@@ -404,6 +410,8 @@ runpane sessions overview --session <id|name> [--json] [--pane-dir <path>]
 runpane lock acquire --name <name> --ttl <duration> [--wait <milliseconds>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock release --name <name> [--force] [--session <id|name>] [--note <text>] [--pane <pane-id>] [--panel <panel-id>] [--json] [--pane-dir <path>]
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
+runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
+runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context

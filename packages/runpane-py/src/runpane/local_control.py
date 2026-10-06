@@ -83,6 +83,15 @@ def run_sessions_update(parsed: Any) -> int:
     return print_session_result(result, parsed.json, "Updated")
 
 
+def run_sessions_pin(parsed: Any, pinned: bool) -> int:
+    result = invoke_daemon(
+        "runpane:sessions:update",
+        [{"selector": _session_selector(parsed), "input": {"isPinned": pinned}}],
+        pane_dir=parsed.pane_dir,
+    )
+    return print_session_result(result, parsed.json, "Pinned" if pinned else "Unpinned")
+
+
 def run_sessions_set_agent(parsed: Any) -> int:
     if not parsed.agent:
         raise ValueError("runpane sessions set-agent requires --agent.")

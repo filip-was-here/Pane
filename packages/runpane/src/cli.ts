@@ -55,6 +55,7 @@ import {
   runLockRelease,
   runSessionsSetAgent,
   runSessionsUpdate,
+  runSessionsPin,
   runReposAdd,
   runReposList,
   runWatch,
@@ -228,6 +229,8 @@ const commandHandlers = new Map<string, CommandHandler>(Object.entries({
   'sessions update': async (parsed, telemetryContext) => {
     return runSessionsUpdate(parsed);
   },
+  'sessions pin': async (parsed) => runSessionsPin(parsed, true),
+  'sessions unpin': async (parsed) => runSessionsPin(parsed, false),
   'sessions set-agent': async (parsed, telemetryContext) => {
     return runSessionsSetAgent(parsed);
   },

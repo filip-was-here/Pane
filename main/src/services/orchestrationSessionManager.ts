@@ -215,7 +215,7 @@ export class OrchestrationSessionManager extends EventEmitter {
         name,
         promotedFrom: sourcePanel && sourcePane ? { paneId: sourcePane.id, panelId: sourcePanel.id } : undefined,
         archived: false,
-        isPinned: false,
+        isPinned: input.isPinned ?? false,
         agent,
         launchCommand,
         customResume,
