@@ -66,3 +66,13 @@ it.each([
   const result = await registry.invoke('file:read', [{ sessionId: '__pane_chat_session__', filePath }]);
   expect(result).toMatchObject(binary ? { success: false, binary: true } : { success: true, content: content.toString('utf8') });
 });
+
+it('rejects incomplete UTF-8 at an exact 8 KiB EOF on both read and write', async () => {
+  const filePath = 'incomplete.unknown';
+  const bytes = Buffer.concat([Buffer.alloc(8191, 0x61), Buffer.from([0xc3])]);
+  await fs.writeFile(path.join(directory, filePath), bytes);
+  const request = { sessionId: '__pane_chat_session__', filePath };
+  await expect(registry.invoke('file:read', [request])).resolves.toMatchObject({ success: false, binary: true });
+  await expect(registry.invoke('file:write', [{ ...request, content: bytes.toString('utf8') }])).resolves.toMatchObject({ success: false });
+  expect(await fs.readFile(path.join(directory, filePath))).toEqual(bytes);
+});
