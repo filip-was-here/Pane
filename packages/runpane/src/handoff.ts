@@ -511,6 +511,9 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     ? ['runpane', 'workspace', remote.name]
     : ['runpane', ...(selectedDirectory ? ['--pane-dir', path.resolve(resolvePaneDirectory(parsed.paneDir))] : [])];
   const recovery = (...args: string[]): string => [...controlPrefix, ...args].map(arg => quote(arg, senderShell)).join(' ');
+  const receiverStatus = (sessionId: string, panelId?: string): string => target
+    ? (panelId ? recovery('panels', 'screen', '--panel', panelId) : recovery('sessions', 'list'))
+    : recovery('agents', 'status', '--pane', sessionId);
   say(step('repo', `${repo.name} (${repo.path}), ${repo.environment ?? 'native'}, ${remote.os}, remote ${repoRemote}`));
   if (parsed.handoffPush && !parsed.dryRun && (!state.pushed || state.dirty.length)) {
     state = pushWork(state, machineLabel, parsed.handoffNoteFile);
@@ -564,7 +567,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     throw new Error(`runpane panes create failed on ${remote.name}: ${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check ${recovery('sessions', 'list')} before retrying to avoid a duplicate Pane.`);
   }
   const item = created.items[0];
-  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Check ${recovery('agents', 'status', '--pane', item.sessionId)} before retrying.${item.panelId ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
+  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item && 'error' in item ? item.error.message : 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Pane ${item.sessionId}. Check ${receiverStatus(item.sessionId, item.panelId)} before retrying.${item.panelId && !target ? ` Inspect panel ${item.panelId}: ${recovery('panels', 'screen', '--panel', item.panelId)}.` : ''}` : ` Check ${recovery('sessions', 'list')} before retrying.`}`);
 
   result.notePath = notePath;
   result.pane = { id: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath };
@@ -582,7 +585,7 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
     return 1;
   }
   say(step('started', `${item.name ?? name} on ${remote.name}${item.worktreePath ? ` (${item.worktreePath})` : ''}`));
-  const check = recovery('agents', 'status', '--pane', item.sessionId);
+  const check = receiverStatus(item.sessionId, item.panelId);
   say(result.reportBack ? `The receiver reports back to ${result.reportBack}.` : 'No sender panel to report to; the receiver reports on the branch.');
   say(`Check on it: ${check}`);
   if (parsed.json) console.log(JSON.stringify(result, null, 2));

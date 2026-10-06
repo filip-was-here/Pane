@@ -327,13 +327,15 @@ function windowsHost(f, options={}) {
  const cp=require('node:child_process');const spawn=cp.spawn;cp.spawn=(command,args,opts)=>command==='runpane'&&args.includes('repos')&&${JSON.stringify(options.hostWrapper??false)}?spawn(process.execPath,['-e',"console.error('Windows wrapper must not override Linux daemon');process.exit(1)"],opts):command==='runpane'?spawn(process.execPath,[${JSON.stringify(cli)},...args],opts):spawn(command,args,opts);
  require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon=async(target,channel,args,schema)=>{
  fs.appendFileSync(${JSON.stringify(log)},JSON.stringify({target,channel,args})+'\\n');
+ if(channel==='runpane:panels:screen')return decode(schema,{ok:true,panelId:args[0].panelId,paneId:'host-pane',source:'scrollback',limit:100,returnedLineCount:1,hasMore:false,text:'receiver screen proof',state:{initialized:true},composer:{isPresent:true,hasUndeliveredText:false}});
  if(channel==='runpane:repos:list')return decode(schema,{ok:true,repos:[${JSON.stringify(repo)}]});
  if(channel==='runpane:panes:create')return decode(schema,{ok:${JSON.stringify(item.ok)},repo:${JSON.stringify(repo)},items:[${JSON.stringify(item)}]});
  if(channel==='runpane:machine:write')return decode(schema,{path:'C:/Users/Jane Doe/handoffs/'+args[0].path.split('/').pop(),bytes:args[0].content.length});
  const command=args[0].command;let stdout='';
  if(/^(runpane|npx)(?: |$)/.test(command))return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:127,stdout:'',stderr:'runpane: command not found'});
  if(command.includes('remote -v'))stdout='origin '+${JSON.stringify(f.git('remote','get-url','origin'))}+' (fetch)';
- return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:0,stdout,stderr:''});};`);
+ return decode(schema,{os:'Windows',shell:${JSON.stringify(options.shell??'bash.exe')},exitCode:0,stdout,stderr:''});};
+ global.fetch=async(url,options)=>{const request=JSON.parse(options.body);const result=await require(${JSON.stringify(path.join(dist,'daemonClient.js'))}).invokeRemoteDaemon({machine:'windows-host',baseUrl:url},request.channel,request.args,require(${JSON.stringify(path.join(dist,'boundaryDecoder.js'))}).boundary.json);return {status:200,text:async()=>JSON.stringify({ok:true,result})};};`);
  f.env.NODE_OPTIONS=`--require=${JSON.stringify(preload)}`; f.env.WSL_DISTRO_NAME='HermeticWSL'; delete f.env.PANE_DIR;
  return ()=>fs.existsSync(log)?fs.readFileSync(log,'utf8').trim().split('\n').map(JSON.parse):[];
 }
@@ -415,7 +417,7 @@ test('unverified local receiver inspection preserves explicit Pane directory', (
 });
 test('partial Windows receiver recovery routes directly from the sender without host CLI', {skip:process.platform!=='linux'}, (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); windowsHost(f,{item:{ok:false,pinned:undefined,warnings:undefined,initialInput:undefined,error:{message:'startup dialog blocked'}}});
- const result=f.run(); assert.notEqual(result.status,0); assert.match(result.stderr,/runpane workspace windows-host panels screen --panel host-panel/); assert.match(result.stderr,/runpane workspace windows-host agents status --pane host-pane/); assert.doesNotMatch(result.stderr,/exec -- runpane/);
+ const result=f.run(); assert.notEqual(result.status,0); assert.match(result.stderr,/runpane workspace windows-host panels screen --panel host-panel/); assert.match(result.stderr,/Pane host-pane/); assert.doesNotMatch(result.stderr,/exec -- runpane/);
 });
 test('successful local receiver status preserves explicit Pane directory', (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); const selected=path.join(f.root,'selected pane'); receiver(f,{paneDir:selected});
@@ -425,7 +427,7 @@ test('successful local receiver status preserves explicit Pane directory', (t) =
 test('successful Windows receiver status routes directly from the sender', {skip:process.platform!=='linux'}, (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); windowsHost(f);
  const result=spawnSync(process.execPath,[cli,'handoff','codex here','--note-file','note.md'],{cwd:f.root,encoding:'utf8',env:f.env});
- assert.equal(result.status,0,result.stderr); assert.match(result.stdout,/Check on it: runpane workspace windows-host agents status --pane host-pane/); assert.doesNotMatch(result.stdout,/exec -- runpane/);
+ assert.equal(result.status,0,result.stderr); assert.match(result.stdout,/Check on it: runpane workspace windows-host panels screen --panel host-panel/); assert.doesNotMatch(result.stdout,/exec -- runpane/);
 });
 test('unverified Windows receiver inspection routes directly and retains note identity', {skip:process.platform!=='linux'}, (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); windowsHost(f,{item:{initialInput:{delivered:true,submitted:false,inputBytes:20,verifiedSubmitted:false,delivery:{state:'in-composer',evidence:'screen'}}}});
@@ -435,4 +437,17 @@ test('unverified Windows receiver inspection routes directly and retains note id
 test('WSL keeps a responding Linux daemon when repo discovery reports an application ENOENT', {skip:process.platform!=='linux'}, (t) => {
  const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled()); receiver(f,{paneDir:path.join(f.env.HOME,'.pane'),reposError:{message:'saved repository data missing',code:'ENOENT'}}); const host=windowsHost(f);
  const result=f.run('--dry-run'); assert.notEqual(result.status,0); assert.match(result.stderr,/saved repository data missing/); assert.deepEqual(host(),[]);
+});
+
+for (const partial of [false,true]) test(`generated remote ${partial?'partial-failure':'success'} guidance executes through actual CLI routing`, {skip:process.platform!=='linux'}, (t) => {
+ const f=fixture(t); fs.writeFileSync(path.join(f.root,'note.md'),filled());
+ const options=partial?{item:{ok:false,pinned:undefined,warnings:undefined,initialInput:undefined,error:{message:'startup dialog blocked'}}}:{};
+ const calls=windowsHost(f,options);
+ const handoff=spawnSync(process.execPath,[cli,'handoff','codex here','--note-file','note.md'],{cwd:f.root,encoding:'utf8',env:f.env});
+ assert.equal(handoff.status,partial?1:0,handoff.stderr);
+ const command=(partial?handoff.stderr.match(/Check (runpane .*?) before retrying/):handoff.stdout.match(/Check on it: (runpane .*)/))?.[1];
+ assert.ok(command,'handoff prints an actionable receiver command');
+ const inspected=spawnSync(process.execPath,[cli,...command.split(' ').slice(1)],{cwd:f.root,encoding:'utf8',env:f.env});
+ assert.equal(inspected.status,0,inspected.stderr); assert.match(inspected.stdout,/receiver screen proof/);
+ const screen=calls().find(c=>c.channel==='runpane:panels:screen'); assert.equal(screen.target.machine,'windows-host'); assert.equal(screen.args[0].panelId,'host-panel');
 });
