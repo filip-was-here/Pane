@@ -47,6 +47,13 @@ describe('OpenCode session ids', () => {
 });
 
 describe('resolveOpenCodeLaunchCommand', () => {
+  it.each(['opencode --prompt hello', 'opencode --prompt=hello'])(
+    'rejects startup prompt arguments that would replay on restore: %s', (baseCommand) => {
+      expect(() => resolveOpenCodeLaunchCommand({ baseCommand, persistedSessionId: 'ses_saved' }))
+        .toThrow(/Pane.*prompt/i);
+    },
+  );
+
   it.each([
     'bash -lc "opencode --auto"',
     'env -- opencode --auto',
@@ -154,6 +161,9 @@ describe('resolveOpenCodeLaunchCommand', () => {
   });
 
   it.each([
+    'opencode -c',
+    'opencode -c=true',
+    'opencode -c --session ses_current',
     'opencode --continue',
     'opencode --continue=ses_old',
     'opencode --continue --session ses_current',

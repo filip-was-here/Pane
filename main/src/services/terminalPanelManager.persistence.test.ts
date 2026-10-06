@@ -324,6 +324,8 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle): void {
     'keeps an explicitly wrapped OpenCode command opaque: %s', async (command) => {
       const panel = makeOpenCodePanel('opaque-opencode-wrapper', { initialCommand: command, launchMode: 'wrapped' });
       const { manager, handle } = await startTerminal(panel);
+      handle.emit('$ ');
+      await new Promise(resolve => setTimeout(resolve, 350));
       handle.written.length = 0;
       await manager.stageInitialCommand(panel.id, command);
       expect(handle.written).toEqual([command]);
@@ -388,6 +390,8 @@ function emitOpenCodeIdleFrame(handle: FakePtyHandle): void {
     panel.state.customState = { agentType: 'opencode', agentSessionId: 'ses_Stage123' };
     createPanelFixture(panel);
     const { manager, handle } = await startTerminal(panel);
+    handle.emit('$ ');
+    await new Promise(resolve => setTimeout(resolve, 350));
     handle.written.length = 0;
 
     await manager.stageInitialCommand(panel.id, 'opencode --auto');

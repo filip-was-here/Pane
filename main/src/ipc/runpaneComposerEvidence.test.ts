@@ -39,6 +39,36 @@ describe('assessComposerEvidence', () => {
       expect(assessComposerEvidence({ beforeText: screen, afterText: screen, stagedText })).toBe('staged');
     },
   );
+  const openCodeComposer = (text: string) => `  ┃\n  ┃  ${text.replaceAll('\n', '\n  ┃  ')}\n  ┃\n  ┃  Build\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n  shift+tab agents  ctrl+p commands`;
+
+  it.each([
+    ['unchanged input', openCodeComposer('Please implement this'), openCodeComposer('Please implement this'), 'staged'],
+    ['a blank redraw', openCodeComposer('Please implement this'), '', 'unknown'],
+    ['no staged input observed', openCodeComposer('Ask anything…'), openCodeComposer('Ask anything…'), 'unknown'],
+    ['a wrapped input line', openCodeComposer('Please implem\nent this'), openCodeComposer('Ask anything…'), 'cleared'],
+  ] as const)('handles OpenCode %s conservatively', (_name, beforeText, afterText, expected) => {
+    expect(assessComposerEvidence({ beforeText, afterText, stagedText: 'Please implement this', agentType: 'opencode' }))
+      .toBe(expected);
+  });
+
+  it('observes an OpenCode submission with the user turn still visible in history', () => {
+    const composer = (text: string) => `  ┃\n  ┃  ${text}\n  ┃\n  ┃  Build\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n  shift+tab agents  ctrl+p commands`;
+    expect(assessComposerEvidence({
+      beforeText: composer('Please implement this'),
+      afterText: `  ┃  Please implement this\n\nDone.\n\n${composer('Ask anything…')}`,
+      stagedText: 'Please implement this',
+      agentType: 'opencode',
+    })).toBe('cleared');
+  });
+
+  it('observes a submitted OpenCode paste marker without requiring the hidden text', () => {
+    expect(assessComposerEvidence({
+      beforeText: openCodeComposer('[Pasted ~3 lines]'),
+      afterText: `First line\nSecond line\nThird line\n\n${openCodeComposer('Ask anything…')}`,
+      stagedText: 'First line\nSecond line\nThird line',
+      agentType: 'opencode',
+    })).toBe('cleared');
+  });
 
   const cases: Array<{
     name: string;

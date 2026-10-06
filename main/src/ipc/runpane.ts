@@ -2051,8 +2051,11 @@ async function submitCreateInitialInput(
   }
 
   if (tool.agent !== 'claude' && tool.agent !== 'codex') {
-    terminalPanelManager.writeToTerminal(panel.id, tool.initialInput);
+    const paste = tool.agent === 'opencode' && isLongPrompt(tool.initialInput)
+      && terminalPanelManager.isBracketedPasteEnabled(panel.id);
+    terminalPanelManager.writeToTerminal(panel.id, paste ? bracketedPaste(tool.initialInput) : tool.initialInput);
     await sleep(300);
+    if (paste) await waitForPanelOutputQuiet(panel.id);
     return submitCreateComposerInput(panel, tool, tool.initialInput);
   }
   const staged = await stageComposerText(panel, tool.agent, tool.initialInput);
@@ -2168,6 +2171,7 @@ async function submitCreateComposerInput(
         beforeText: beforeScreen.text,
         afterText: afterScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       });
 
       if (lastVerdict === 'cleared' && panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit)) {
@@ -2190,11 +2194,13 @@ async function submitCreateComposerInput(
         beforeText: beforeScreen.text,
         afterText: confirmationScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       });
       const unchangedSinceFirstSample = assessComposerEvidence({
         beforeText: afterScreen.text,
         afterText: confirmationScreen.text,
         stagedText: evidenceText,
+        agentType: tool.agent,
       }) === 'staged';
       const confirmationScreenHasFreshOutput = panelHasFreshOutputSince(panel.id, outputGenerationBeforeSubmit);
       lastVerdict = confirmationVerdict;

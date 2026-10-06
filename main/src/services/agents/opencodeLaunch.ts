@@ -189,6 +189,10 @@ export function resolveOpenCodeLaunchCommand(options: OpenCodeLaunchOptions): Op
   for (let index = 0; index < selectorLimit; index += 1) {
     const token = tokens[index].value;
 
+    if (token === '--prompt' || token.startsWith('--prompt=')) {
+      throw new Error('Use Pane initial input (--prompt on runpane), not OpenCode --prompt, to avoid replaying the prompt on restore');
+    }
+
     if (token === '--session' || token === '-s') {
       if (index + 1 >= selectorLimit) {
         throw new Error(`OpenCode ${token} selector is missing its operand`);
@@ -207,7 +211,7 @@ export function resolveOpenCodeLaunchCommand(options: OpenCodeLaunchOptions): Op
       throw new Error('OpenCode does not support the -s=<id> selector form');
     }
 
-    if (token === '--continue' || token.startsWith('--continue=')) {
+    if (token === '--continue' || token.startsWith('--continue=') || token === '-c' || token.startsWith('-c=')) {
       throw new Error('OpenCode launch command cannot use --continue');
     }
   }

@@ -1,3 +1,5 @@
+import type { TerminalPanelState } from '../../../shared/types/panels';
+
 export type ComposerEvidenceVerdict = 'staged' | 'cleared' | 'unknown';
 
 const COMPOSER_PROMPT_PATTERN = /^[>›❯▌]/u;
@@ -55,10 +57,24 @@ export function assessComposerEvidence(args: {
   beforeText: string;
   afterText: string;
   stagedText: string;
+  agentType?: TerminalPanelState['agentType'];
 }): ComposerEvidenceVerdict {
   const marker = firstNonEmptyLine(args.stagedText)?.slice(0, MAX_MARKER_LENGTH);
   if (!marker) {
     return 'unknown';
+  }
+
+  if (args.agentType === 'opencode') {
+    const before = openCodeComposer(args.beforeText);
+    const after = openCodeComposer(args.afterText);
+    // Soft wrapping inserts line breaks inside words; compare prompt content
+    // independently of the TUI's current column width.
+    if (before === undefined || after === undefined) return 'unknown';
+    const pasteMarker = `[Pasted ~${args.stagedText.trim().split(/\r?\n/u).length} lines]`;
+    const content = (before.includes(pasteMarker) ? pasteMarker : marker).replace(/\s/gu, '');
+    if (!before.replace(/\s/gu, '').includes(content)) return 'unknown';
+    if (!after.replace(/\s/gu, '').includes(content)) return 'cleared';
+    return before === after ? 'staged' : 'unknown';
   }
 
   if (!args.afterText.includes(marker)) {
@@ -76,6 +92,21 @@ export function assessComposerEvidence(args: {
   }
 
   return 'unknown';
+}
+
+/** OpenCode's live composer ends at its bottom border; earlier turns are not input. */
+function openCodeComposer(text: string): string | undefined {
+  const lines = text.split(/\r?\n/u);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (!/^\s*╹▀{3,}/u.test(lines[index])) continue;
+    const footer = lines.slice(index + 1).filter(line => line.trim());
+    if (footer.length > 3 || !footer.some(line => line.includes('ctrl+p commands'))) return undefined;
+    let start = index;
+    while (start > 0 && /^\s*┃/u.test(lines[start - 1])) start -= 1;
+    if (start === index) return undefined;
+    return lines.slice(start, index).map(line => line.replace(/^\s*┃\s?/u, '').trimEnd()).join('\n');
+  }
+  return undefined;
 }
 
 function firstNonEmptyLine(text: string): string | undefined {

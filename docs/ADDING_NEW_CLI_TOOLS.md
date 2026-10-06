@@ -169,6 +169,9 @@ Direct OpenCode launches use Pane's durable session id and readiness-gated input
 Native selector insertion accepts literal direct commands and simple assignment or
 `env NAME=value` prefixes, not recognized shell wrappers or `env --` forms. Those
 forms fail before native identity allocation; explicitly wrapped launches remain opaque.
+Native commands reject both `--continue` and `-c`, and reject OpenCode's
+`--prompt` argument because it would replay on every restore. Supply initial
+input through Pane (or RunPane's `--prompt`) instead.
 Wrapped OpenCode launches run unchanged; the wrapper owns session selection and
 resume, just as it does for the other supported agents.
 

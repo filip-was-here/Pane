@@ -158,6 +158,10 @@ const terminalPanel: ToolPanel = {
   },
 };
 
+function openCodeComposer(text: string): string {
+  return `  ┃\n  ┃  ${text.replaceAll('\n', '\n  ┃  ')}\n  ┃\n  ┃  Build\n  ╹▀▀▀▀▀▀▀▀▀▀▀▀\n  shift+tab agents  ctrl+p commands`;
+}
+
 function terminalSnapshot(
   text: string,
   activityStatus: 'active' | 'idle',
@@ -4664,11 +4668,11 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() => ({
       ...terminalSnapshot(
         submitted
-        ? 'OpenCode working\nesc interrupt  ctrl+p commands'
+        ? `Implement issue 252\nOpenCode working\n\n${openCodeComposer('Ask anything…')}`
         : staged
-          ? '❯ Implement issue 252\n╹▀▀▀  ctrl+p commands'
+          ? openCodeComposer('Implement issue 252')
           : ready
-            ? '❯ \n╹▀▀▀  ctrl+p commands'
+            ? openCodeComposer('Ask anything…')
             : 'OpenCode is starting',
         submitted ? 'active' : 'idle',
         'opencode',
@@ -5073,6 +5077,7 @@ describe('runpane IPC handlers', () => {
           vi.mocked(terminalPanelManager.writeToTerminal).mockReset();
           let openCodeStaged = false;
           let openCodeSubmitted = false;
+          vi.mocked(terminalPanelManager.isBracketedPasteEnabled).mockReturnValue(toolKind === 'opencode');
           vi.mocked(terminalPanelManager.writeToTerminal).mockImplementation((_panelId, input) => {
             if (toolKind !== 'opencode') return;
             if (input === '\r') openCodeSubmitted = true;
@@ -5128,8 +5133,8 @@ describe('runpane IPC handlers', () => {
                 ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}\n\n  gpt-5.6 high\n  ? for shortcuts`
                 : toolKind === 'opencode'
                   ? openCodeSubmitted
-                    ? 'OpenCode working\nesc interrupt  ctrl+p commands'
-                    : `❯ ${openCodeStaged ? inputCase.input : ''}\n╹▀▀▀  ctrl+p commands`
+                    ? `${inputCase.input}\nOpenCode working\n\n${openCodeComposer('Ask anything…')}`
+                    : openCodeComposer(openCodeStaged ? inputCase.input : 'Ask anything…')
                   : `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`,
               'idle',
               toolKind as 'claude' | 'codex' | 'opencode',
@@ -5153,6 +5158,9 @@ describe('runpane IPC handlers', () => {
           }, { interval: 1 });
           // SAFETY: The panes:create handler resolves to a result object exposing the per-pane `items` array read below.
           const result = await resultPromise as { items: Array<{ ok?: boolean; initialInput?: unknown }> };
+          if (toolKind === 'opencode' && waitReady && inputCase.name === 'multiline') {
+            expect(terminalPanelManager.writeToTerminal).toHaveBeenCalledWith('panel-1', `\x1b[200~${inputCase.input}\x1b[201~`);
+          }
           // SAFETY: createPanel was invoked for a terminal panel, so the captured initialState is the terminal customState.
           const initialState = createRequest?.initialState as TerminalPanelState | undefined;
           const useArgument = toolKind === 'claude'
