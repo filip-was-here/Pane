@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { FilePreviewKind } from '../../../../../shared/utils/filePreview';
 import type { FilePreviewListing } from '../../../../../shared/types/filePreview';
 import { MarkdownPreview } from '../../MarkdownPreview';
@@ -10,6 +9,8 @@ import { usePreviewUrl } from './usePreviewUrl';
 import { fileExtension, getLanguageFromPath } from './fileKinds';
 import { parseDelimitedPreview, readPreviewText } from './documentPreviewData';
 
+const Editor = lazy(() => import('@monaco-editor/react'));
+
 interface PreviewProps {
   sessionId: string;
   filePath: string;
@@ -18,6 +19,8 @@ interface PreviewProps {
 }
 
 function PreviewTable({ columns, rows }: Pick<FilePreviewListing, 'columns' | 'rows'>) {
+  // This immutable read-only snapshot has no sorting, filtering, or cell state.
+  // Positions identify cells; duplicate headers and rows are valid data.
   return (
     <div className="h-full overflow-auto">
       <table className="min-w-full text-sm border-collapse text-text-primary">
@@ -104,8 +107,8 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
         <span>{kind === 'html' ? 'Read-only HTML source' : 'Read-only preview'}</span>
         {kind === 'pdf' && <FilePreviewActions sessionId={sessionId} filePath={filePath} />}
         {isText && kind !== 'html' && <div className="flex gap-2">
-          <button aria-pressed={!source} onClick={() => setSource(false)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Preview</button>
-          <button aria-pressed={source} onClick={() => setSource(true)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Source</button>
+          <button type="button" aria-pressed={!source} onClick={() => setSource(false)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Preview</button>
+          <button type="button" aria-pressed={source} onClick={() => setSource(true)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Source</button>
         </div>}
         {document?.truncated && <span role="status">Showing the first 1 MiB.</span>}
         {table?.truncated && <span>Table preview limited to 500 data rows.</span>}
@@ -121,7 +124,7 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
         : table ? <PreviewTable columns={table.rows[0] ?? []} rows={table.rows.slice(1)} />
         : !source && kind === 'markdown' ? <div className="h-full overflow-auto p-6"><MarkdownPreview content={content} /></div>
         : (
-          <MonacoErrorBoundary><Editor theme={isLightTheme(theme) ? 'light' : 'vs-dark'} value={content} language={getLanguageFromPath(filePath)} options={{ readOnly: true, domReadOnly: true, folding: true, minimap: { enabled: false }, wordWrap: 'on', automaticLayout: true }} /></MonacoErrorBoundary>
+          <MonacoErrorBoundary><Suspense fallback={<p role="status" className="p-6 text-text-secondary">Loading source editor...</p>}><Editor theme={isLightTheme(theme) ? 'light' : 'vs-dark'} value={content} language={getLanguageFromPath(filePath)} options={{ readOnly: true, domReadOnly: true, folding: true, minimap: { enabled: false }, wordWrap: 'on', automaticLayout: true }} /></Suspense></MonacoErrorBoundary>
         )}
       </div>
     </div>

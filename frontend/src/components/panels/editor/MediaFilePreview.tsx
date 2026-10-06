@@ -19,8 +19,8 @@ export function FilePreviewActions({ sessionId, filePath }: FileLocation) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-3">
-        <button className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('open')}>Open with system app</button>
-        <button className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('reveal')}>Reveal in folder</button>
+        <button type="button" className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('open')}>Open with system app</button>
+        <button type="button" className="px-3 py-2 rounded bg-surface-secondary text-text-primary hover:bg-surface-tertiary" onClick={() => void act('reveal')}>Reveal in folder</button>
       </div>
       {actionError && <p role="alert" className="text-status-error">{actionError}</p>}
     </div>
@@ -51,6 +51,7 @@ export function MediaFilePreview({ sessionId, filePath, kind, fileName }: FileLo
   };
   return (
     <div className="h-full flex flex-col items-center justify-center gap-4 p-4 bg-surface-primary text-text-primary">
+      {/* Local media has no supplied caption file. Do not fabricate empty tracks. */}
       {kind === 'video' ? (
         <video {...properties} className="w-full min-h-0 flex-1 object-contain" onLoadedMetadata={event => {
           const video = event.currentTarget;
