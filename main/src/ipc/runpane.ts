@@ -1,5 +1,5 @@
 import { paneCommandSignal } from '../daemon/commandRegistry';
-import { WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
+import { MAX_WORKSPACE_WAIT_TIMEOUT_MS, WorkspaceWatchCancelledError, WorkspaceWatchLeases } from '../services/workspaceWatchLeases';
 import { resolveProjectRegistration, projectRegistrationKey, validateProjectRepository } from '../services/projectRegistration';
 import fs from 'fs';
 import path from 'path';
@@ -251,7 +251,6 @@ const DEFAULT_ARCHIVE_CLEANUP_TIMEOUT_MS = 30_000;
 const DEFAULT_ARCHIVE_CLEANUP_POLL_INTERVAL_MS = 200;
 const GH_PR_LOOKUP_TIMEOUT_MS = 10_000;
 const DEFAULT_WORKSPACE_WAIT_TIMEOUT_MS = 60_000;
-const MAX_WORKSPACE_WAIT_TIMEOUT_MS = 120_000;
 const DEFAULT_WORKSPACE_WAIT_LIMIT = 256;
 // Named cursors are keys in workspace-cursors.json, never file names. 128 fits `session-<id>` for
 // any Session ID; runpane shortens the names it derives to 64 for older daemons.
@@ -1411,16 +1410,15 @@ export function registerRunpaneHandlers(
   commandRegistry.register('runpane:workspace:wait', async (request: PaneCommandValue = {}): Promise<RunpaneWorkspaceWaitResult> => {
     return withRunpaneAction(services, 'workspace:wait', {}, async () => {
       const normalized = parseWorkspaceWaitRequest(request);
+      const project = normalized.repo
+        ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
+        : undefined;
+      // Validate selectors before taking over a healthy cursor.
+      const sessionRecord = normalized.session
+        ? await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })
+        : undefined;
       const lease = watchLeases.acquire(normalized.as, paneCommandSignal());
       try {
-        const project = normalized.repo
-          ? resolveRepoSelector(databaseService.getAllProjects(), normalized.repo)
-          : undefined;
-        // Resolve the Session (id or exact name) once; its members are re-read on every journal read.
-        const sessionRecord = normalized.session
-          ? await requireOrchestrationSessionManager(services).get({ sessionId: normalized.session })
-          : undefined;
-        lease.signal.throwIfAborted();
         const session = sessionRecord ? { id: sessionRecord.id, name: sessionRecord.name } : undefined;
         const filter: WorkspaceJournalFilter = {
           kinds: normalized.kinds,
@@ -4783,6 +4781,8 @@ async function withRunpaneAction<T extends { ok: boolean }>(
     }
     return result;
   } catch (error) {
+    // Disconnect and cursor takeover are normal lifecycle events, not failed commands.
+    if (error instanceof WorkspaceWatchCancelledError) throw error;
     trackRunpaneAction(services, action, 'failure', Date.now() - startedAt, {
       ...metadata,
       ok: false,

@@ -922,13 +922,50 @@ describe('runpane IPC handlers', () => {
     }
   });
 
-  it('lets a re-armed named cursor take over its slot after repeated restarts', async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-takeover-'));
+  it('allows the maximum long poll to time out normally before its lease expires', async () => {
+    vi.useFakeTimers();
+    const workspaceJournal = new WorkspaceJournal();
+    const registry = createRegistry(createServices({ workspaceJournal }));
+    try {
+      const waiting = registry.invoke('runpane:workspace:wait', [{ since: 0, timeoutMs: 120_000 }]);
+      await vi.advanceTimersByTimeAsync(120_000);
+      await expect(waiting).resolves.toMatchObject({ ok: true, timedOut: true, entries: [] });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      workspaceJournal.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the current named watcher alive when a replacement has an invalid selector', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-invalid-'));
     const workspaceJournal = new WorkspaceJournal();
     const registry = createRegistry(createServices({
       workspaceJournal,
       workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
     }));
+    const request = { as: 'healthy-monitor', timeoutMs: 60_000 };
+    try {
+      await registry.invoke('runpane:workspace:wait', [request]);
+      const healthy = registry.invoke('runpane:workspace:wait', [request]);
+      const assertion = expect(healthy).resolves.toMatchObject({ entries: [{ kind: 'pane.created' }] });
+      await expect(registry.invoke('runpane:workspace:wait', [{ ...request, repo: 'missing-repo' }])).rejects.toThrow();
+      workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
+      await assertion;
+    } finally {
+      workspaceJournal.dispose();
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('lets a re-armed named cursor take over its slot after repeated restarts', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-watch-takeover-'));
+    const workspaceJournal = new WorkspaceJournal();
+    const services = createServices({
+      workspaceJournal,
+      workspaceCursorStore: new WorkspaceCursorStore(path.join(directory, 'cursors.json')),
+    });
+    const registry = createRegistry(services);
     const request = { as: 'restarted-monitor', timeoutMs: 60_000 };
     try {
       await registry.invoke('runpane:workspace:wait', [request]); // Establish the cursor.
@@ -938,7 +975,13 @@ describe('runpane IPC handlers', () => {
       const assertion = expect(replacement).resolves.toMatchObject({ ok: true, entries: [{ kind: 'pane.created' }] });
       workspaceJournal.append({ kind: 'pane.created', paneId: 'new', paneName: 'New', source: 'session' });
       await assertion;
-      await Promise.all(abandoned);
+      for (const result of await Promise.all(abandoned)) {
+        expect(result).toBeInstanceOf(Error);
+        expect(result).toEqual(expect.objectContaining({ message: expect.stringContaining('superseded') }));
+      }
+      expect(services.analyticsManager?.track).not.toHaveBeenCalledWith(
+        'runpane_local_control', expect.objectContaining({ action: 'workspace:wait', status: 'failure' }),
+      );
     } finally {
       workspaceJournal.dispose();
       fs.rmSync(directory, { recursive: true, force: true });
