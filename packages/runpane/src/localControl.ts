@@ -316,6 +316,7 @@ interface PaneCreateFailureItem {
   name?: string;
   sessionId?: string;
   paneId?: string;
+  panelId?: string;
   worktreePath?: string;
   error: { message: string; code?: string };
 }
@@ -1088,7 +1089,7 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   report: boundary.optional(agentReportSchema),
 });
 
-const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
+export const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
   ok: boundary.literal(true),
   repos: boundary.array(repoSummarySchema),
 });
@@ -1389,6 +1390,7 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       name: boundary.optional(boundary.string),
       sessionId: boundary.optional(boundary.string),
       paneId: boundary.optional(boundary.string),
+      panelId: boundary.optional(boundary.string),
       worktreePath: boundary.optional(boundary.string),
       error: boundary.object({
       message: boundary.string,
