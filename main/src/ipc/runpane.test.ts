@@ -2803,10 +2803,10 @@ describe('runpane IPC handlers', () => {
   });
 
   it.each([
-    ['› Continue the existing task\n  gpt-5.6 high\n', true],
+    ['› Continue the existing task\n\n  gpt-5.6 high\n  ? for shortcuts\n', true],
     ['› [Pasted Content 2048 chars]\n  Ctrl+Enter to submit\n', true],
-    ['› Ask Codex to do anything\n  gpt-5.6 high\n', false],
-    ['previous output\n›\n  gpt-5.6 high\n', false],
+    ['› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n', false],
+    ['previous output\n›\n\n  gpt-5.6 high\n  ? for shortcuts\n', false],
   ])('reports whether the Codex composer has undelivered text', async (text, expected) => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
       terminalSnapshot(text, 'idle'),
@@ -2865,7 +2865,7 @@ describe('runpane IPC handlers', () => {
   it('waits for ready terminal state with bounded screen output', async () => {
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: '› Ask Codex to do anything\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -2890,7 +2890,7 @@ describe('runpane IPC handlers', () => {
       timedOut: false,
       screen: {
         source: 'scrollback',
-        text: '› Ask Codex to do anything\n',
+        text: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       },
       nextCommand: `runpane panels screen --panel ${terminalPanel.id} --limit 80 --json`,
     });
@@ -3009,6 +3009,58 @@ describe('runpane IPC handlers', () => {
     expect(await createRegistry().invoke('runpane:panels:wait', [{
       panelId: terminalPanel.id, timeoutMs: 100, intervalMs: 1,
     }])).toMatchObject({ ok: false, timedOut: false, blocked: { kind: 'first-run-dialog' } });
+  });
+
+  it('waits for trust after a provisional Codex composer persists across several polls', async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const provisional = terminalSnapshot(
+      '>_ OpenAI Codex (v0.160.0)\n  permissions: YOLO mode\n  Pull up a prompt.\n\n› Ask Codex to do anything\n  ? for shortcuts',
+      'active',
+    );
+    const trust = terminalSnapshot('Folder access\nTrust this folder?\n› 1. Trust and continue\n  2. Quit', 'active');
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
+      Date.now() - startedAt < 1500 ? provisional : trust);
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 5000, intervalMs: 500,
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      ok: false, matched: false, timedOut: false,
+      blocked: { kind: 'first-run-dialog', message: expect.stringContaining('Trust this folder?') },
+    });
+  });
+
+  it.each([
+    'GPT-6.1-Sol low fast · /tmp/qa',
+    'gpt-5.6 high',
+    'o3 high · /tmp/qa',
+    '100% context left',
+  ])('recognizes configured Codex readiness from its live footer: %s', async (footer) => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      `› Ask Codex to do anything\n\n  ${footer}\n  ? for shortcuts`, 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 30, intervalMs: 1,
+    }])).toMatchObject({ ok: true, matched: true, timedOut: false });
+  });
+
+  it('does not infer Codex readiness from missing chrome or a model mentioned above the composer', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      'gpt-5.6 high\nPrevious model information\n› Ask Codex to do anything\n  ? for shortcuts', 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 10, intervalMs: 1,
+    }])).toMatchObject({ ok: false, matched: false, timedOut: true });
+  });
+
+  it('does not mistake model names typed in the provisional composer for a status row', async () => {
+    vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
+      '› Compare these models:\n  gpt-5.6 high\n\n\n  ? for shortcuts', 'idle',
+    ));
+    expect(await createRegistry().invoke('runpane:panels:wait', [{
+      panelId: terminalPanel.id, timeoutMs: 10, intervalMs: 1,
+    }])).toMatchObject({ ok: false, timedOut: true });
   });
 
   it('reports Codex update prompts as blockers instead of ready', async () => {
@@ -3869,7 +3921,7 @@ describe('runpane IPC handlers', () => {
     } as never);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
-      scrollbackBuffer: '› Ask Codex to do anything\n',
+      scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
       alternateScreenBuffer: '',
       isAlternateScreen: false,
       activityStatus: 'idle',
@@ -4081,12 +4133,12 @@ describe('runpane IPC handlers', () => {
       .mockReturnValue(2);
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReturnValue('2026-01-01T00:01:59.300Z');
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle'))
       .mockReturnValueOnce(terminalSnapshot('Working on TM-x\n›', 'active'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4132,7 +4184,7 @@ describe('runpane IPC handlers', () => {
     vi.mocked(terminalPanelManager.getLastOutputAt).mockReturnValue(undefined);
     vi.mocked(terminalPanelManager.getOutputGeneration).mockReturnValue(0);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(
-      terminalSnapshot('› /do TM-x', 'idle', 'codex', '2026-01-01T00:01:59.000Z'),
+      terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle', 'codex', '2026-01-01T00:01:59.000Z'),
     );
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4168,10 +4220,10 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(codexPanel);
     vi.mocked(panelManager.getPanel).mockReturnValue(codexPanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /frobnicate x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
       .mockReturnValue(terminalSnapshot('You ran /frobnicate x\nWorking\n›', 'active'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4218,7 +4270,7 @@ describe('runpane IPC handlers', () => {
       .mockReturnValueOnce(3)
       .mockReturnValue(3);
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockImplementation(() =>
-      terminalSnapshot('› /do TM-x', 'idle', 'codex', new Date(Date.now() + 1).toISOString()),
+      terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts', 'idle', 'codex', new Date(Date.now() + 1).toISOString()),
     );
     const startedAt = Date.now();
 
@@ -4325,9 +4377,9 @@ describe('runpane IPC handlers', () => {
     vi.mocked(panelManager.createPanel).mockResolvedValue(codexPanel);
     vi.mocked(panelManager.getPanel).mockReturnValue(codexPanel);
     vi.mocked(terminalPanelManager.getTerminalSnapshot)
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
-      .mockReturnValueOnce(terminalSnapshot('› /do TM-x', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
+      .mockReturnValueOnce(terminalSnapshot('› /do TM-x\n\n  gpt-5.6 high\n  ? for shortcuts\n', 'idle'))
       .mockReturnValue(terminalSnapshot('›', 'idle'));
 
     const resultPromise = createRegistry(createServices()).invoke('runpane:panes:create', [{
@@ -4410,7 +4462,7 @@ describe('runpane IPC handlers', () => {
             // SAFETY: The `custom` kind is handled above, leaving only agent kinds the snapshot frames as claude/codex.
             return terminalSnapshot(
               toolKind === 'codex'
-                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}`
+                ? `› ${inputCase.name === 'slash' ? inputCase.input : 'Ask Codex to do anything'}\n\n  gpt-5.6 high\n  ? for shortcuts`
                 : `${'─'.repeat(40)}\n❯ \n${'─'.repeat(40)}`,
               'idle',
               toolKind as 'claude' | 'codex',

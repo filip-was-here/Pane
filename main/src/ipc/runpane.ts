@@ -19,7 +19,7 @@ import { getPaneEventSink } from '../core/runtime';
 import { syncPaneHomeSkill } from '../services/paneHomeSkill';
 import { fastCheckWorkingDirectory, listCommitsAhead } from '../services/gitPlumbingCommands';
 import { assertNewBranchName } from '../services/worktreeManager';
-import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
+import { assessComposerEvidence, hasConfiguredCodexScreen, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
 import { getManifestForAgent } from '../services/agentStatus/manifests';
@@ -2479,7 +2479,9 @@ async function waitForPanel(panel: ToolPanel, request: RunpanePanelWaitRequest):
       return panelWaitResult(panel, condition, false, false, startedAt, lastScreen, blocked);
     }
 
-    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), Math.max(timeoutMs - (Date.now() - startedAt), 0)));
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
+    await sleep(Math.min(intervalMs, Math.max(1, timeoutMs / 2), remainingMs));
   }
 
   return panelWaitResult(panel, condition, false, true, startedAt, lastScreen);
@@ -2501,7 +2503,8 @@ function isWaitConditionMatched(
     case 'ready':
       if (blocked || !screen.state.initialized) return false;
       if (!screen.state.isCliPanel) return true;
-      // Claude and Codex are ready once their composer is on screen, not at their first output.
+      if (screen.state.agentType === 'codex' && !hasConfiguredCodexScreen(screen.text)) return false;
+      // A composer alone is enough for Claude; Codex also has a provisional one.
       return screen.state.isCliReady === true
         && (screen.composer.isPresent || (screen.state.agentType !== 'claude' && screen.state.agentType !== 'codex'));
     case 'idle':
