@@ -1795,8 +1795,12 @@ test('agent-opened pages open as tabs in a split beside the Session conversation
   const [agentStrip, pageStrip] = [await layoutBox(groupStrips.nth(0)), await layoutBox(groupStrips.nth(1))];
   expect(pageStrip.y).toBe(agentStrip.y);
   expect(pageStrip.height).toBe(agentStrip.height);
-  const titleBar = await layoutBox(page.getByTestId('window-title-bar'));
-  expect(agentStrip.y).toBe(titleBar.y + titleBar.height);
+  // Linux uses native window decorations rather than the renderer title bar.
+  const titleBar = page.getByTestId('window-title-bar');
+  if (await titleBar.count()) {
+    const titleBarBox = await layoutBox(titleBar);
+    expect(agentStrip.y).toBe(titleBarBox.y + titleBarBox.height);
+  }
 
   await openPage('report-page', 'report.html', false);
   await expect(groupStrips.nth(1).getByRole('tab', { name: 'plan.html' })).toHaveAttribute('aria-selected', 'true');
