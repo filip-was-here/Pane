@@ -574,7 +574,7 @@ describe('runpane IPC handlers', () => {
           sessionId: session.id,
           panelId: claudePanel.id,
           readiness: { ok: true, condition: 'ready' },
-          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: true },
+          initialInput: { delivered: true, submitted: true, strategy: 'argument', verifiedSubmitted: false },
           nextCommand: expect.stringContaining(`--panel ${claudePanel.id}`),
         }],
       });
@@ -3904,7 +3904,7 @@ describe('runpane IPC handlers', () => {
     });
   });
 
-  it('reports earned Claude argument delivery during wait-ready pane creation', async () => {
+  it('requires observed evidence before verifying Claude argument delivery during pane creation', async () => {
     // SAFETY: This test fixture intentionally supplies the minimal structural substitute exercised by the unit.
     const claudePanel = {
       id: 'panel-1',
@@ -3970,8 +3970,8 @@ describe('runpane IPC handlers', () => {
           submitted: true,
           strategy: 'argument',
           sequenceName: 'argument',
-          verifiedSubmitted: true,
-          delivery: { state: 'taken', evidence: 'argv' },
+          verifiedSubmitted: false,
+          delivery: { state: 'unknown', evidence: 'argv' },
         },
       }],
     });
@@ -4437,10 +4437,10 @@ describe('runpane IPC handlers', () => {
             waitReady && toolKind !== 'custom',
           );
           if (waitReady && toolKind !== 'custom' && inputCase.name !== 'slash') {
-            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} verified result`).toMatchObject({
+            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} unverified launch result`).toMatchObject({
               ok: true,
               initialInput: {
-                verifiedSubmitted: true,
+                verifiedSubmitted: false,
               },
             });
           }

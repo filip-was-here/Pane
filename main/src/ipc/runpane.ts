@@ -1946,16 +1946,17 @@ async function submitCreateInitialInput(
     const sentAt = optionalString(customState.initialInputSentAt);
     const deliveryError = optionalString(customState.initialInputError);
     const delivered = Boolean(sentAt) && !deliveryError;
+    const delivery: RunpaneDelivery = delivered && readiness?.ok === true
+      ? await argumentDelivery(panel, tool, cwd, sentAt)
+      : { state: 'unknown', evidence: 'argv' };
     const result: RunpaneInitialInputDeliveryResult = {
       delivered,
       submitted: delivered,
       inputBytes: Buffer.byteLength(tool.initialInput, 'utf8'),
       strategy: 'argument',
       sequenceName: 'argument',
-      verifiedSubmitted: delivered && readiness?.ok === true,
-      delivery: delivered && readiness?.ok === true
-        ? await argumentDelivery(panel, tool, cwd, sentAt)
-        : { state: 'unknown', evidence: 'argv' },
+      verifiedSubmitted: delivery.state === 'taken' || delivery.state === 'queued',
+      delivery,
       sentAt,
       nextCommand: readiness?.nextCommand ?? panelWaitCommand(panel.id),
     };
@@ -1994,9 +1995,8 @@ async function submitCreateInitialInput(
 }
 
 /**
- * A launch-argument prompt reached the agent with its launch (`argv`); the
- * transcript upgrades that to `transcript` evidence once the agent has
- * recorded the turn. One read, no waiting: create has already waited for ready.
+ * Launch arguments prove routing, not acceptance. Verify the recorded turn or
+ * a visible queue acknowledgement. One read: create has already waited for ready.
  */
 async function argumentDelivery(
   panel: ToolPanel,
@@ -2010,7 +2010,11 @@ async function argumentDelivery(
     const check = await checkTranscriptDelivery({ ...probe, sentAtMs });
     if (check.delivery) return check.delivery;
   }
-  return { state: 'taken', evidence: 'argv' };
+  const screen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
+  if (probe && screenShowsQueuedMessage(screen.text, probe.agentType, tool.initialInput ?? '')) {
+    return { state: 'queued', evidence: 'screen' };
+  }
+  return { state: 'unknown', evidence: 'argv' };
 }
 
 async function clearInitialInputSentPremark(panel: ToolPanel): Promise<void> {
