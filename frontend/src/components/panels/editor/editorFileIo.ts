@@ -1,7 +1,8 @@
 /**
  * IPC reads for a center editor tab: file bodies (text or a blob URL for
- * images/PDFs) and the per-file git status badge.
+ * images/PDFs, streamed media, or a binary notice) and the git status badge.
  */
+import { mediaFileKind } from '../../../../../shared/utils/mediaFile';
 import { fileExtension, IMAGE_EXTENSIONS, PDF_EXTENSIONS } from './fileKinds';
 
 export interface FileItem {
@@ -14,12 +15,14 @@ export type GitFileStatus = 'clean' | 'modified' | 'untracked';
 
 export type EditorFileContent =
   | { kind: 'text'; content: string }
+  | { kind: 'media'; mediaKind: 'video' | 'audio' }
+  | { kind: 'unsupported' }
   | { kind: 'binary'; blobUrl: string }
   | { kind: 'error'; message: string };
 
 export function isBinaryPath(filePath: string): boolean {
   const ext = fileExtension(filePath);
-  return IMAGE_EXTENSIONS.has(ext) || PDF_EXTENSIONS.has(ext);
+  return IMAGE_EXTENSIONS.has(ext) || PDF_EXTENSIONS.has(ext) || mediaFileKind(filePath) !== null;
 }
 
 function binaryMimeType(ext: string): string {
@@ -30,6 +33,8 @@ function binaryMimeType(ext: string): string {
 }
 
 export async function readEditorFile(sessionId: string, filePath: string): Promise<EditorFileContent> {
+  const mediaKind = mediaFileKind(filePath);
+  if (mediaKind) return { kind: 'media', mediaKind };
   if (isBinaryPath(filePath)) {
     const result = await window.electronAPI.invoke('file:read-binary', { sessionId, filePath });
     if (!result.success || !result.contentBase64) {
@@ -43,6 +48,7 @@ export async function readEditorFile(sessionId: string, filePath: string): Promi
   }
 
   const result = await window.electronAPI.invoke('file:read', { sessionId, filePath });
+  if (result.binary) return { kind: 'unsupported' };
   if (!result.success) return { kind: 'error', message: result.error };
   return { kind: 'text', content: result.content };
 }

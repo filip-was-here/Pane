@@ -1,3 +1,4 @@
+import { isBinaryFile } from '../utils/binaryFile';
 import { PathResolver } from '../utils/pathResolver';
 import { CommandRunner } from '../utils/commandRunner';
 import { isOrchestrationInternalSessionId } from '../../../shared/types/orchestrationSession';
@@ -210,6 +211,9 @@ export function registerFileHandlers(
         throw new Error('File path is outside worktree');
       }
 
+      if (await isBinaryFile(fullPath)) {
+        return { success: false, binary: true, error: 'Binary files cannot be edited as text' };
+      }
       const content = await fs.readFile(fullPath, 'utf-8');
       return { success: true, content };
     } catch (error) {
@@ -317,6 +321,10 @@ export function registerFileHandlers(
       // Verify the file is within the worktree using PathResolver
       if (!await pathResolver.isWithin(basePath, fullPath)) {
         throw new Error('File path is outside worktree');
+      }
+
+      if (await fileExists(fullPath) && await isBinaryFile(fullPath)) {
+        throw new Error('Binary files cannot be edited as text');
       }
 
       // Create directory if it doesn't exist

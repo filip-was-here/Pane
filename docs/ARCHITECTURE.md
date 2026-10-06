@@ -61,6 +61,21 @@ change how panels show, hide or refresh.
 Agent status (working, idle, blocked) is derived in
 `main/src/services/agentStatus/`.
 
+## File previews
+
+`FileEditorView.tsx` routes editor tabs from the Files inspector, terminal links,
+and `runpane panels open --file`. Images/PDFs use blob previews. Local video and
+audio use native media controls through `pane-media`, registered in
+`main/src/services/mediaPreview.ts`. A revocable URL grants access to one file;
+each request rechecks the existing worktree/symlink boundary through
+`file:getPath`. `mediaStream.ts` streams byte ranges from disk for seeking.
+Media never passes through text/base64 IPC. Remote-host media currently shows
+an unavailable notice instead of reading the client's disk.
+
+`file:read` samples at most 8 KiB before decoding UTF-8. Binary files show a
+read-only notice, and `file:write` refuses to overwrite binary content as text.
+Media extensions always bypass the editor, including unsupported codecs.
+
 ## Data
 
 - The data directory is `~/.pane` for an installed app. `--pane-dir` or

@@ -28,12 +28,12 @@ describe('fileEditorReducer', () => {
   });
 
   it('load-binary keeps the file selected with the blob and no text', () => {
-    const next = fileEditorReducer(loading(), { type: 'load-binary', file: image, blobUrl: 'blob:new' });
+    const next = fileEditorReducer(loading(), { type: 'load-binary', previewKind: 'image', file: image, blobUrl: 'blob:new' });
     expect(next).toMatchObject({ selectedFile: image, binaryBlobUrl: 'blob:new', fileContent: '', originalContent: '', loading: false, error: null });
   });
 
   it('a failed binary read still selects the file so the header shows the error', () => {
-    const next = fileEditorReducer(loading(), { type: 'load-binary', file: image, blobUrl: null, error: 'boom' });
+    const next = fileEditorReducer(loading(), { type: 'load-binary', previewKind: 'image', file: image, blobUrl: null, error: 'boom' });
     expect(next).toMatchObject({ selectedFile: image, binaryBlobUrl: null, error: 'boom', loading: false });
   });
 

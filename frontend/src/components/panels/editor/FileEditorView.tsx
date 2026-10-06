@@ -1,6 +1,6 @@
 /**
  * FileEditorView: the editor half of the old Explorer split. Renders one file
- * (Monaco, markdown/notebook preview, image or PDF) for a center `editor`
+ * (Monaco, markdown/notebook preview, image, PDF or media) for a center `editor`
  * tab. The tree that opens files lives in the Files inspector (FileEditor).
  */
 import { useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
@@ -15,11 +15,13 @@ import { NotebookPreview } from './NotebookPreview';
 import type { EditorPanelState } from '../../../../../shared/types/panels';
 import { isHtmlFile } from './htmlFile';
 import { previewHtmlFileInBrowser } from './previewHtmlFile';
-import { fileExtension, getLanguageFromPath, IMAGE_EXTENSIONS, PDF_EXTENSIONS } from './fileKinds';
+import { fileExtension, getLanguageFromPath, IMAGE_EXTENSIONS } from './fileKinds';
 import { fetchGitFileStatus, isBinaryPath, readEditorFile, type FileItem } from './editorFileIo';
 import { fileEditorReducer, initialFileEditorState } from './fileEditorState';
 import { restoreEditorPosition, trackEditorPosition, type PositionTracker } from './monacoPosition';
 import { FileEditorHeader } from './FileEditorHeader';
+import { MediaFilePreview, FilePreviewNotice } from './MediaFilePreview';
+import { mediaFileKind } from '../../../../../shared/utils/mediaFile';
 import { BinaryFilePreview } from './BinaryFilePreview';
 
 export interface FileEditorViewProps {
@@ -43,7 +45,7 @@ export function FileEditorView({
   onUserEdit,
 }: FileEditorViewProps) {
   const [state, dispatch] = useReducer(fileEditorReducer, initialFileEditorState);
-  const { selectedFile, fileContent, originalContent, loading, error, gitStatus, binaryBlobUrl, viewMode } = state;
+  const { selectedFile, fileContent, originalContent, loading, error, gitStatus, binaryBlobUrl, viewMode, previewKind } = state;
   const selectedFilePathRef = useCommittedRef(selectedFile?.path ?? null);
   const onStateChangeRef = useCommittedRef(onStateChange);
   const mountedRef = useRef(true);
@@ -72,9 +74,7 @@ export function FileEditorView({
   const ext = selectedFile ? fileExtension(selectedFile.path) : '';
   const isMarkdownFile = ext === 'md' || ext === 'markdown';
   const isNotebookFile = ext === 'ipynb';
-  const isImageFile = IMAGE_EXTENSIONS.has(ext);
-  const isPdfFile = PDF_EXTENSIONS.has(ext);
-  const isBinaryPreview = isImageFile || isPdfFile;
+  const isBinaryPreview = previewKind !== null;
 
   const previewHtmlFile = useCallback(async (path: string) => {
     dispatch({ type: 'error', message: null });
@@ -118,11 +118,13 @@ export function FileEditorView({
       if (loaded.kind === 'text') {
         dispatch({ type: 'load-text', file, content: loaded.content });
       } else {
-        // A failed image/PDF read still shows the header, with the error under it.
+        // Preview files never enter Monaco, including when loading fails.
         dispatch({
           type: 'load-binary',
           file,
           blobUrl: loaded.kind === 'binary' ? loaded.blobUrl : null,
+          previewKind: loaded.kind === 'unsupported' ? 'unsupported'
+            : mediaFileKind(file.path) ?? (IMAGE_EXTENSIONS.has(fileExtension(file.path)) ? 'image' : 'pdf'),
           error: loaded.kind === 'error' ? loaded.message : undefined,
         });
       }
@@ -213,6 +215,7 @@ export function FileEditorView({
   }, [autoSaveRef, onUserEdit]);
 
   const handleEditorChange = (value: string | undefined) => {
+    if (isBinaryPreview || loading || selectedFile?.path !== filePath) return;
     editRevision.current += 1;
     const content = value || '';
     dispatch({ type: 'edit', content });
@@ -242,7 +245,7 @@ export function FileEditorView({
     if (selectedFile?.path === filePath) return;
     autoSave.flush();
     positionTrackerRef.current?.cancel();
-    void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false });
+    void loadFile({ name: filePath.split(/[\\/]/).pop() || '', path: filePath, isDirectory: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
 
@@ -254,7 +257,7 @@ export function FileEditorView({
     if (loading) return;
     lastReopenedAt.current = reopenedAt;
     if (!reopenedAt || hasUnsavedChanges) return;
-    void loadFile({ name: filePath.split('/').pop() || '', path: filePath, isDirectory: false }, true);
+    void loadFile({ name: filePath.split(/[\\/]/).pop() || '', path: filePath, isDirectory: false }, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialState?.reopenedAt, loading]);
 
@@ -296,7 +299,7 @@ export function FileEditorView({
   }
 
   const canToggleMode = !isBinaryPreview && (isMarkdownFile || isNotebookFile);
-  const fileName = selectedFile.path.split('/').pop() || 'Image';
+  const fileName = selectedFile.path.split(/[\\/]/).pop() || 'Image';
 
   return (
     <div ref={containerRef} className="h-full w-full min-w-0 flex flex-col overflow-hidden">
@@ -315,7 +318,11 @@ export function FileEditorView({
         </div>
       )}
       <div className="flex-1 min-w-0 overflow-hidden">
-        {viewMode === 'preview' && isMarkdownFile ? (
+        {previewKind === 'video' || previewKind === 'audio' ? (
+          <MediaFilePreview key={`${sessionId}:${selectedFile.path}:${initialState?.reopenedAt ?? ''}`} kind={previewKind} sessionId={sessionId} filePath={selectedFile.path} fileName={fileName} />
+        ) : previewKind === 'unsupported' ? (
+          <FilePreviewNotice sessionId={sessionId} filePath={selectedFile.path} message="Binary file — text editing is disabled." />
+        ) : viewMode === 'preview' && isMarkdownFile ? (
           <div className="h-full overflow-auto bg-bg-primary">
             <MarkdownPreview
               content={fileContent}
@@ -327,8 +334,9 @@ export function FileEditorView({
           <div className="h-full overflow-auto bg-bg-primary">
             <NotebookPreview content={fileContent} className="min-h-full" />
           </div>
-        ) : isBinaryPreview && (binaryBlobUrl || !error) ? (
-          <BinaryFilePreview kind={isImageFile ? 'image' : 'pdf'} blobUrl={binaryBlobUrl} fileName={fileName} />
+        ) : isBinaryPreview ? (
+          error ? <FilePreviewNotice sessionId={sessionId} filePath={selectedFile.path} message="Preview unavailable." /> :
+          <BinaryFilePreview kind={previewKind === 'image' ? 'image' : 'pdf'} blobUrl={binaryBlobUrl} fileName={fileName} />
         ) : (
           <MonacoErrorBoundary>
             <Editor
