@@ -33,10 +33,12 @@ describe('looksLikePendingComposer', () => {
 });
 
 describe('assessComposerEvidence', () => {
-  it('keeps a Codex prompt staged while its persistent status footer is visible', () => {
-    const screen = '› /do TM-x\n\n  GPT-6.1-Sol low fast · /tmp/qa\n  ? for shortcuts';
-    expect(assessComposerEvidence({ beforeText: screen, afterText: screen, stagedText })).toBe('staged');
-  });
+  it.each(['? for shortcuts', '← for agents · ? for shortcuts'])(
+    'keeps a Codex prompt staged with persistent footer %s', (hint) => {
+      const screen = `› /do TM-x\n\n  GPT-6.1-Sol low fast · /tmp/qa\n  ${hint}`;
+      expect(assessComposerEvidence({ beforeText: screen, afterText: screen, stagedText })).toBe('staged');
+    },
+  );
 
   const cases: Array<{
     name: string;

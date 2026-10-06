@@ -2967,6 +2967,7 @@ describe('runpane IPC handlers', () => {
   });
 
   it('waits for ready terminal state with bounded screen output', async () => {
+    vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue({
       initialized: true,
       scrollbackBuffer: '› Ask Codex to do anything\n\n  gpt-5.6 high\n  ? for shortcuts\n',
@@ -2981,10 +2982,13 @@ describe('runpane IPC handlers', () => {
     });
     const registry = createRegistry();
 
-    const result = await registry.invoke('runpane:panels:wait', [{
+    const pending = registry.invoke('runpane:panels:wait', [{
       panelId: terminalPanel.id,
       timeoutMs: 10,
     }]);
+
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await pending;
 
     expect(result).toMatchObject({
       ok: true,
@@ -3136,17 +3140,21 @@ describe('runpane IPC handlers', () => {
   });
 
   it.each([
-    'GPT-6.1-Sol low fast · /tmp/qa',
-    'gpt-5.6 high',
-    'o3 high · /tmp/qa',
-    '100% context left',
+    'GPT-6.1-Sol low fast · /tmp/qa\n  ? for shortcuts',
+    'GPT-6-Astra medium · ~\\qa\n  ← for agents · ? for shortcuts',
+    'gpt-5.6 high\n  ? for shortcuts',
+    'o3 high · /tmp/qa\n  ? for shortcuts',
+    '100% context left\n  ? for shortcuts',
   ])('recognizes configured Codex readiness from its live footer: %s', async (footer) => {
+    vi.useFakeTimers();
     vi.mocked(terminalPanelManager.getTerminalSnapshot).mockReturnValue(terminalSnapshot(
-      `› Ask Codex to do anything\n\n  ${footer}\n  ? for shortcuts`, 'idle',
+      `› Ask Codex to do anything\n\n  ${footer}`, 'idle',
     ));
-    expect(await createRegistry().invoke('runpane:panels:wait', [{
+    const pending = createRegistry().invoke('runpane:panels:wait', [{
       panelId: terminalPanel.id, timeoutMs: 30, intervalMs: 1,
-    }])).toMatchObject({ ok: true, matched: true, timedOut: false });
+    }]);
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({ ok: true, matched: true, timedOut: false });
   });
 
   it('does not infer Codex readiness from missing chrome or a model mentioned above the composer', async () => {

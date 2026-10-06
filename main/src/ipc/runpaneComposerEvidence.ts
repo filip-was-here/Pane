@@ -16,7 +16,7 @@ const COMPOSER_TAIL_LINES = 3;
  */
 function configuredCodexFooterStart(lines: readonly string[]): number | undefined {
   const last = lines.map(line => line.length > 0).lastIndexOf(true);
-  if (last < 2 || !/^\? for shortcuts\b/iu.test(lines[last]) || lines[last - 2] !== '') return undefined;
+  if (last < 2 || !/^(?:← for agents · )?\? for shortcuts\b/iu.test(lines[last]) || lines[last - 2] !== '') return undefined;
   const status = lines[last - 1];
   const configured = /^(?:gpt[-\s]\d[\w.-]*|o\d(?:[-.][\w.-]+)?)(?:\s|$)/iu.test(status)
     || /^\d+% context left\b/iu.test(status);
