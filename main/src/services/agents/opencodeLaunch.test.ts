@@ -47,6 +47,29 @@ describe('OpenCode session ids', () => {
 });
 
 describe('resolveOpenCodeLaunchCommand', () => {
+  it.each([
+    'bash -lc "opencode --auto"',
+    'env -- opencode --auto',
+  ])('rejects unsupported wrapper argv before allocating an identity: %s', (baseCommand) => {
+    let allocations = 0;
+    expect(() => resolveOpenCodeLaunchCommand({
+      baseCommand,
+      allocateSessionId: () => { allocations += 1; return 'ses_generated'; },
+    })).toThrow(/unsupported.*wrapper/i);
+    expect(allocations).toBe(0);
+  });
+
+  it.each([
+    'MODE="large model" opencode --auto',
+    'env MODE="large model" opencode --auto',
+    'env opencode --auto',
+    '"/opt/Open Code/bin/opencode" --model "large model"',
+  ])('preserves supported direct executable and environment prefixes: %s', (baseCommand) => {
+    expect(resolveOpenCodeLaunchCommand({ baseCommand, allocateSessionId: () => 'ses_generated' })).toEqual({
+      commandToRun: `${baseCommand} --session "ses_generated"`, sessionId: 'ses_generated',
+    });
+  });
+
   it('allocates and appends a session selector', () => {
     expect(resolveOpenCodeLaunchCommand({
       baseCommand: 'opencode --auto',

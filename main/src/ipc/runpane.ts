@@ -34,7 +34,7 @@ import {
   readPanelAgentReport,
 } from '../services/agentReport';
 import { resolveAgentTypeFromCommand } from '../services/agents/agentIdentity';
-import { isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
+import { assertDirectOpenCodeLaunchCommand, isValidOpenCodeSessionId } from '../services/agents/opencodeLaunch';
 import {
   bracketedPaste,
   claudePromptWarnings,
@@ -4770,6 +4770,10 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
   }
 
   const declaredAgent = tool.agentType;
+  const commandAgent = resolveAgentTypeFromCommand(tool.command);
+  if (commandAgent === 'opencode' && (!declaredAgent || declaredAgent === 'opencode')) {
+    assertDirectOpenCodeLaunchCommand(tool.command);
+  }
   if (!declaredAgent) {
     return {
       title: tool.title ?? 'Terminal',
@@ -4785,7 +4789,7 @@ function resolveToolSpec(tool: RunpaneToolSpec, environment?: ProjectEnvironment
     title: tool.title ?? AGENT_TEMPLATES[declaredAgent].title,
     command: tool.command,
     agent: declaredAgent,
-    launchMode: resolveAgentTypeFromCommand(tool.command) === declaredAgent ? undefined : 'wrapped',
+    launchMode: commandAgent === declaredAgent ? undefined : 'wrapped',
     initialInput: tool.initialInput,
     initialInputAsFilePointer: tool.initialInputAsFilePointer,
   };

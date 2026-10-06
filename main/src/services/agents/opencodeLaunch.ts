@@ -153,9 +153,35 @@ export function isValidOpenCodeSessionId(value: string): boolean {
   return OPENCODE_SESSION_ID_PATTERN.test(value);
 }
 
+function scanDirectOpenCodeTokens(command: string): ShellToken[] {
+  const tokens = scanShellTokens(command);
+  const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
+  let executableIndex = 0;
+  // Shell assignments must start unquoted; env receives ordinary literal argv.
+  while (tokens[executableIndex] && assignment.test(command.slice(tokens[executableIndex].start))) {
+    executableIndex += 1;
+  }
+  if (tokens[executableIndex]?.value === 'env') {
+    executableIndex += 1;
+    while (tokens[executableIndex] && assignment.test(tokens[executableIndex].value)) {
+      executableIndex += 1;
+    }
+  }
+  const executable = tokens[executableIndex]?.value.replace(/\\/g, '/').split('/').pop()?.toLowerCase();
+  if (executable !== 'opencode') {
+    throw new Error('OpenCode native launch contains an unsupported command wrapper; use an explicit wrapped launch');
+  }
+  return tokens.slice(executableIndex);
+}
+
+/** Read-only preflight: recognition of an agent inside a wrapper is not safe selector insertion. */
+export function assertDirectOpenCodeLaunchCommand(baseCommand: string): void {
+  scanDirectOpenCodeTokens(baseCommand);
+}
+
 export function resolveOpenCodeLaunchCommand(options: OpenCodeLaunchOptions): OpenCodeLaunchCommand {
   const { baseCommand } = options;
-  const tokens = scanShellTokens(baseCommand);
+  const tokens = scanDirectOpenCodeTokens(baseCommand);
   const terminatorIndex = tokens.findIndex(({ value }) => value === '--');
   const selectorLimit = terminatorIndex === -1 ? tokens.length : terminatorIndex;
   const commandSessionIds: string[] = [];

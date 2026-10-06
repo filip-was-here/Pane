@@ -2,7 +2,7 @@ import { validateCustomCommandResume, customResumeAgentType, type CustomCommandR
 import { validateWSLAvailable } from '../utils/wslUtils';
 import { sessionRuntimePath } from './sessionRuntime';
 import { findClaudeSessionTranscript } from './claudeSessionTranscript';
-import { resolveAgentTypeFromCommand } from './agents/agentIdentity';
+import { CLI_AGENT_TYPES, resolveAgentTypeFromCommand } from './agents/agentIdentity';
 import { prepareSessionWorkspace, sessionWorkspacePath, discardSessionScaffold, isPristineSessionWorkspace } from './sessionWorkspace';
 import { DEFAULT_SESSION_PROFILE } from '../../../shared/types/sessionProfile';
 import { EventEmitter } from 'events';
@@ -959,7 +959,7 @@ export class OrchestrationSessionManager extends EventEmitter {
       : association.panelIds.map(panelId => panelManager.getPanel(panelId)).filter((panel): panel is ToolPanel => panel !== undefined);
     const panels: OrchestrationPanelOverview[] = allPanels.map(panel => {
       const customState = decodeBoundary(panel.state.customState ?? {}, boundary.object({
-        agentType: boundary.optional(boundary.enumeration('claude', 'codex', 'cursor')),
+        agentType: boundary.optional(boundary.enumeration(...CLI_AGENT_TYPES)),
         isInitialized: boundary.optional(boundary.boolean),
       }));
       const snapshot = panel.type === 'terminal' ? terminalPanelManager.getTerminalSnapshot(panel.id) : null;
