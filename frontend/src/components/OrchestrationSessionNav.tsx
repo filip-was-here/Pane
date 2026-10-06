@@ -92,6 +92,8 @@ export function OrchestrationSessionNav({
   const selectedSessionId = useOrchestrationSessionStore(state => state.selectedSessionId);
   const availability = useOrchestrationSessionStore(state => state.availability);
   const error = useOrchestrationSessionStore(state => state.error);
+  const selectionError = useOrchestrationSessionStore(state => state.selectionError);
+  const sessionError = selectionError ?? error;
   const load = useOrchestrationSessionStore(state => state.load);
   const refresh = useOrchestrationSessionStore(state => state.refresh);
   const select = useOrchestrationSessionStore(state => state.select);
@@ -106,6 +108,7 @@ export function OrchestrationSessionNav({
   const [localPinnedSectionExpanded, setLocalPinnedSectionExpanded] = useState(true);
   const [sessionMenu, setSessionMenu] = useState<SessionContextMenuState | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const compactError = actionError ?? sessionError;
   const isPinnedSectionExpanded = pinnedSectionExpanded ?? localPinnedSectionExpanded;
   const setPinnedSectionExpanded = onPinnedSectionExpandedChange ?? setLocalPinnedSectionExpanded;
 
@@ -142,15 +145,14 @@ export function OrchestrationSessionNav({
   }, [refresh]);
 
   const openSession = useCallback(async (sessionId: string) => {
-    setActionError(null);
     // Navigation belongs to the click, never to the order of remote replies.
     void setActiveSession(null);
     navigateToPaneChat();
     try {
       await select({ sessionId });
-    } catch (cause) {
-      if (useOrchestrationSessionStore.getState().selectedSessionId !== sessionId) return;
-      setActionError(cause instanceof Error ? cause.message : 'Failed to open Session');
+    } catch {
+      // The store owns selection errors, including retries from the content view.
+      // Keeping a second local copy would leave the sidebar error after recovery.
     }
   }, [navigateToPaneChat, select, setActiveSession]);
 
@@ -317,23 +319,26 @@ export function OrchestrationSessionNav({
             </button>
           </Tooltip>
         ))}
-        {error && (
-          <Tooltip content={error} side="right">
+        {sessionError && (
+          <Tooltip content={sessionError} side="right">
             <button
               type="button"
               data-testid="compact-sessions-error"
               data-compact-rail-item
-              aria-label="Sessions unavailable"
-              onClick={() => void load()}
+              aria-label={selectionError ? "Retry selected Session" : "Sessions unavailable"}
+              onClick={() => {
+                if (selectionError && selectedSessionId) void openSession(selectedSessionId);
+                else void load();
+              }}
               className="flex h-9 w-9 items-center justify-center rounded text-status-error hover:bg-surface-hover focus:outline-none focus:ring-2 focus:ring-interactive"
             >
               <RefreshCw className="h-4 w-4" />
             </button>
           </Tooltip>
         )}
-        {actionError && (
-          <Tooltip content={actionError} side="right">
-            <span role="alert" aria-label={actionError} className="flex h-9 w-9 items-center justify-center rounded text-status-error">!</span>
+        {compactError && (
+          <Tooltip content={compactError} side="right">
+            <span role="alert" aria-label={compactError} className="flex h-9 w-9 items-center justify-center rounded text-status-error">!</span>
           </Tooltip>
         )}
         <SessionContextMenu
@@ -419,10 +424,13 @@ export function OrchestrationSessionNav({
           </button>
         </div>
         <div id="orchestration-sessions-list" hidden={!sectionExpanded}>
-        {error && (
+        {sessionError && (
           <div className="mx-3 mb-1 rounded border border-status-error/40 bg-status-error/10 px-2 py-1.5 text-[11px] text-status-error" role="alert">
-            <p>{error}</p>
-            <button type="button" className="mt-1 underline" onClick={() => void load()}>Retry</button>
+            <p>{sessionError}</p>
+            <button type="button" className="mt-1 underline" onClick={() => {
+              if (selectionError && selectedSessionId) void openSession(selectedSessionId);
+              else void load();
+            }}>Retry</button>
           </div>
         )}
         {actionError && (

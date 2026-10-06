@@ -3,6 +3,7 @@ import { DEFAULT_APPEARANCE } from '../../shared/types/appearance';
 import { ThemeProvider } from '../src/contexts/ThemeProvider';
 import { useIPCEvents } from '../src/hooks/useIPCEvents';
 import { createRoot } from 'react-dom/client';
+import { OrchestrationSessionNav } from '../src/components/OrchestrationSessionNav';
 import { ProjectSessionList } from '../src/components/ProjectSessionList';
 import { SessionView } from '../src/components/SessionView';
 import { WindowTitleBar } from '../src/components/WindowTitleBar';
@@ -42,7 +43,7 @@ window.addEventListener('project-sessions-refresh', () => { runtimeRefreshes += 
 const api = {
   invoke: (channel: string, id: string) => channel === 'panels:shouldAutoCreate' ? Promise.resolve(false) : channel === 'panels:get-layout' ? wait('layout', id) : defaultMethod(),
   events: new Proxy({}, { get: (_target, key) => (listener: (event: RuntimeEvent) => void) => { const listeners = handlers.get(key) ?? new Set(); listeners.add(listener); handlers.set(key, listeners); return () => { listeners.delete(listener); }; } }),
-  orchestrationSessions: { list: () => location.search.includes('events') ? wait('list', 'a') : Promise.resolve(list()), select: (selector: { sessionId: string }) => wait('select', selector.sessionId), get: (selector: { sessionId: string }) => wait('get', selector.sessionId), overview: (selector: { sessionId: string }) => Promise.resolve({ success: true, data: { session: records.find(record => record.id === selector.sessionId), status: { state: 'idle' }, panes: [], activity: [], refreshedAt: '2026-01-01' } }) },
+  orchestrationSessions: { update: (selector: { sessionId: string }) => wait('update', selector.sessionId), list: () => location.search.includes('events') ? wait('list', 'a') : Promise.resolve(list()), select: (selector: { sessionId: string }) => wait('select', selector.sessionId), get: (selector: { sessionId: string }) => wait('get', selector.sessionId), overview: (selector: { sessionId: string }) => Promise.resolve({ success: true, data: { session: records.find(record => record.id === selector.sessionId), status: { state: 'idle' }, panes: [], activity: [], refreshedAt: '2026-01-01' } }) },
   terminal: methods,
   panels: { ...methods, getSessionPanels: (id: string) => wait('panels', id), setActivePanel: defaultMethod },
   config: { get: () => Promise.resolve({ success: true, data: location.search.includes('lists') ? runtimeConfig() : useConfigStore.getState().config }) },
@@ -84,7 +85,7 @@ Object.assign(window, { selectionTest: {
     else handlers.get('onPaneFocusRequested')?.forEach(listener => listener({ paneId: 'a' }));
   },
   runtimeRefreshes: () => runtimeRefreshes,
-  state: () => ({ route: useNavigationStore.getState().activeView, session: useOrchestrationSessionStore.getState().selectedSessionId, pane: useSessionStore.getState().activeSessionId }),
+  state: () => ({ error: useOrchestrationSessionStore.getState().error, selectionError: useOrchestrationSessionStore.getState().selectionError, route: useNavigationStore.getState().activeView, session: useOrchestrationSessionStore.getState().selectedSessionId, pane: useSessionStore.getState().activeSessionId }),
 } });
 function RuntimeEvents() { useIPCEvents(); return null; }
 type CommitSnapshot = { selected?: string; contents: Array<string | null>; focused: string | null };
@@ -92,4 +93,4 @@ const commits: CommitSnapshot[] = [];
 const captureCommit = () => { commits.push({ selected: useOrchestrationSessionStore.getState().selectedSessionId, contents: Array.from(document.querySelectorAll('.pane-chat-shell')).map(node => node.getAttribute('data-session-content-id')), focused: document.querySelector('[data-session-focused="true"]')?.getAttribute('data-session-tile') ?? null }); };
 Object.assign(window.selectionTest, { commits: () => commits, resetCommits: () => { commits.length = 0; } });
 const noop = () => {};
-createRoot(document.getElementById('root')!).render(<Profiler id="selection" onRender={captureCommit}><ThemeProvider>{location.search.includes('runtime') && <RuntimeEvents />}<WindowTitleBar projects={[{ id: 1, name: 'Test', path: '/test', active: true, created_at: '2026-01-01', updated_at: '2026-01-01' }]} sidebarWidth={250} sidebarCollapsed={false} /><div style={{ display: 'flex', height: 700 }}><aside style={{ width: 250 }}><ProjectSessionList projects={[]} onProjectsChange={noop} onProjectsRefresh={noop} sessionSortAscending pinnedSectionExpanded repositoriesSectionExpanded onPinnedSectionExpandedChange={noop} onRepositoriesSectionExpandedChange={noop} /></aside><SessionView /></div></ThemeProvider></Profiler>);
+createRoot(document.getElementById('root')!).render(<Profiler id="selection" onRender={captureCommit}><ThemeProvider>{location.search.includes('runtime') && <RuntimeEvents />}<WindowTitleBar projects={[{ id: 1, name: 'Test', path: '/test', active: true, created_at: '2026-01-01', updated_at: '2026-01-01' }]} sidebarWidth={250} sidebarCollapsed={false} /><div style={{ display: 'flex', height: 700 }}><aside style={{ width: 250 }}>{location.search.includes('compact') ? <OrchestrationSessionNav compact /> : <ProjectSessionList projects={[]} onProjectsChange={noop} onProjectsRefresh={noop} sessionSortAscending pinnedSectionExpanded repositoriesSectionExpanded onPinnedSectionExpandedChange={noop} onRepositoriesSectionExpandedChange={noop} />}</aside><SessionView /></div></ThemeProvider></Profiler>);

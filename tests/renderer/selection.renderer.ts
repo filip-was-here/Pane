@@ -291,6 +291,10 @@ test('same-host reconnect retains failed Session intent and retry; explicit sele
   await expect(page).toHaveTitle(/Session B/);
   expect(await state(page)).toMatchObject({ session: 'b', route: 'pane-chat' });
   await expect(tile.getByRole('alert')).toContainText('Disconnected B');
+  await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin Session', exact: true }).click();
+  await resolve(page, 'update', 'b', 'Pin failed independently');
+  await expect(page.locator('aside').getByRole('alert').filter({ hasText: 'Pin failed independently' })).toBeVisible();
   await tile.getByRole('button', { name: 'Retry', exact: true }).click();
   await resolve(page, 'select', 'b');
   await expect(page.getByRole('status').filter({ hasText: 'Opening Session B' })).toBeVisible();
@@ -299,6 +303,8 @@ test('same-host reconnect retains failed Session intent and retry; explicit sele
   }
   await expect(tile.locator('.pane-chat-shell')).toBeVisible();
   await expect(tile.getByRole('alert')).toHaveCount(0);
+  await expect(page.locator('aside').getByRole('alert').filter({ hasText: 'Disconnected B' })).toHaveCount(0);
+  await expect(page.locator('aside').getByRole('alert').filter({ hasText: 'Pin failed independently' })).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('orchestration-sessions-changed', { detail: { kind: 'selected' } })));
   await resolve(page, 'list', 'a');
   await expect(page).toHaveTitle(/Session A/);
@@ -329,3 +335,37 @@ test('explicit external selection remains authoritative while local Session sele
   await expect(page.locator('[data-session-tile="a"]').getByRole('alert')).toHaveCount(0);
   await expect(page.getByRole('status').filter({ hasText: 'Opening Session A' })).toBeVisible();
 });
+
+for (const compact of [false, true]) {
+  for (const reconnect of compact ? [false, true] : [false]) {
+    test(`actual ${compact ? 'compact' : 'expanded'} sidebar Retry recovers clicked B (reconnect: ${reconnect})`, async ({ page }) => {
+      await page.goto(`/renderer-tests/selection.html?runtime-events${compact ? '-compact' : ''}`);
+      await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click();
+      await resolve(page, 'select', 'b', 'Disconnected B');
+      const sidebar = page.locator('aside');
+      if (reconnect) {
+        await page.evaluate(() => window.selectionTest.emit('resync'));
+        await expect.poll(() => page.evaluate(() => window.selectionTest.runtimeRefreshes())).toBe(1);
+        await resolve(page, 'list', 'a');
+        expect(await state(page)).toMatchObject({ error: null, selectionError: 'Disconnected B', session: 'b' });
+      }
+      await page.getByRole('button', { name: 'Open Session Session B', exact: true }).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Pin Session', exact: true }).click();
+      await resolve(page, 'update', 'b', 'Pin failed independently');
+      const retry = compact ? sidebar.getByTestId('compact-sessions-error') : sidebar.getByRole('button', { name: 'Retry', exact: true });
+      await retry.click();
+      await expect.poll(() => page.evaluate(() => window.selectionTest.pending().filter(request => request.kind === 'select').map(request => request.id))).toEqual(['b']);
+      expect(await state(page)).toMatchObject({ session: 'b', route: 'pane-chat' });
+      await expect(page).toHaveTitle(/Session B/);
+      await expect(page.getByRole('status').filter({ hasText: 'Opening Session B' })).toBeVisible();
+      await resolve(page, 'select', 'b');
+      while (await page.evaluate(() => window.selectionTest.pending().some(request => request.kind === 'get' && request.id === 'b'))) await resolve(page, 'get', 'b');
+      await expect(page.locator('[data-session-content-id="b"]')).toBeVisible();
+      await expect(page.getByRole('alert').filter({ hasText: 'Disconnected B' })).toHaveCount(0);
+      if (compact) {
+        await expect(sidebar.getByRole('alert', { name: 'Pin failed independently' })).toBeVisible();
+        await expect(retry).toHaveCount(0);
+      } else await expect(sidebar.getByRole('alert').filter({ hasText: 'Pin failed independently' })).toBeVisible();
+    });
+  }
+}
