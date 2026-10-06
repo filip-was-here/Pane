@@ -101,9 +101,9 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
   return (
     <div className="h-full flex flex-col bg-surface-primary">
       <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-border-primary text-xs text-text-secondary">
-        <span>Read-only preview</span>
+        <span>{kind === 'html' ? 'Read-only HTML source' : 'Read-only preview'}</span>
         {kind === 'pdf' && <FilePreviewActions sessionId={sessionId} filePath={filePath} />}
-        {isText && <div className="flex gap-2">
+        {isText && kind !== 'html' && <div className="flex gap-2">
           <button aria-pressed={!source} onClick={() => setSource(false)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Preview</button>
           <button aria-pressed={source} onClick={() => setSource(true)} className="px-2 py-1 rounded bg-surface-secondary text-text-primary">Source</button>
         </div>}
@@ -120,9 +120,7 @@ export function DocumentFilePreview({ sessionId, filePath, fileName, kind }: Pre
         : listing ? <PreviewTable columns={listing.columns} rows={listing.rows} />
         : table ? <PreviewTable columns={table.rows[0] ?? []} rows={table.rows.slice(1)} />
         : !source && kind === 'markdown' ? <div className="h-full overflow-auto p-6"><MarkdownPreview content={content} /></div>
-        : !source && kind === 'html' ? (
-          <iframe title={fileName} sandbox="" className="w-full h-full bg-surface-primary" srcDoc={`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">${content}`} />
-        ) : (
+        : (
           <MonacoErrorBoundary><Editor theme={isLightTheme(theme) ? 'light' : 'vs-dark'} value={content} language={getLanguageFromPath(filePath)} options={{ readOnly: true, domReadOnly: true, folding: true, minimap: { enabled: false }, wordWrap: 'on', automaticLayout: true }} /></MonacoErrorBoundary>
         )}
       </div>

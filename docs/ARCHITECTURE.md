@@ -73,8 +73,9 @@ each request rechecks the existing worktree/symlink boundary through
 not pass through text/base64 IPC. Remote-host previews show an unavailable notice.
 
 Markdown, HTML, CSV/TSV and structured text fetch at most 1 MiB. Markdown renders
-with a source toggle. HTML renders in a script-disabled sandbox with external
-loads blocked; use `panels open --url` for an intentional live browser tab.
+with a source toggle. HTML displays as read-only source, so markup, links and
+resource references remain inert; use `panels open --url` for an intentional
+live browser tab.
 Tables display at most 500 data rows and 100 columns. JSON/JSONL are formatted;
 YAML/TOML retain source formatting in read-only Monaco with folding. Fonts use
 a temporary FontFace specimen. Decode failures offer system open/reveal actions.
@@ -83,8 +84,10 @@ a temporary FontFace specimen. Decode failures offer system open/reveal actions.
 headers without extraction, with at most 1,000 entries. ZIP64/split ZIP and
 compressed TAR are unsupported; extended TAR names are not expanded. SQLite
 lists tables/views from a bounded temporary copy (32 MiB), opened read-only and
-removed afterward. Active WAL databases are refused; no source sidecars are
-created. No table data queries are executed.
+removed afterward. Nonempty WAL and rollback journals are refused before and
+after copying; no source sidecars are created. Native schema inspection runs in
+a child process with a 3-second deadline, a 1 MiB output cap and at most 1,000
+displayed entries. No table data queries are executed.
 
 `file:read` samples at most 8 KiB before decoding UTF-8. Binary files show a
 read-only notice, and `file:write` refuses to overwrite binary content as text.
