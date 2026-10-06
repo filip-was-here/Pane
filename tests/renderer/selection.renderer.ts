@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 
 declare global {
-  interface Window { selectionTest: { commits: () => Array<{ selected?: string; contents: Array<string | null>; focused: string | null }>; resetCommits: () => void; emit: (kind: 'host' | 'pane') => void; resolve: (kind: string, id: string, error?: string) => void; state: () => { route: string; session?: string; pane: string | null }; pending: () => Array<{ kind: string; id: string }> } }
+  interface Window { selectionTest: { commits: () => Array<{ selected?: string; contents: Array<string | null>; focused: string | null }>; resetCommits: () => void; runtimeRefreshes: () => number; emit: (kind: 'host' | 'pane' | 'resync') => void; resolve: (kind: string, id: string, error?: string) => void; state: () => { route: string; session?: string; pane: string | null }; pending: () => Array<{ kind: string; id: string }> } }
 }
 
 async function resolve(page: import('@playwright/test').Page, kind: string, id: string, error?: string) {
@@ -248,3 +248,30 @@ test('persistent tiles reject the earlier A visit while preserving the unrelated
   await resolve(page, 'get', 'a');
   await expect(page.locator('[data-session-content-id="a"]')).toBeVisible();
 });
+
+for (const source of ['initial', 'resync']) {
+  for (const collidingIds of [true, false]) {
+    test(`late outgoing ${source} list cannot replace restored incoming host (colliding ids: ${collidingIds})`, async ({ page }) => {
+      await page.goto(`/renderer-tests/selection.html?runtime-lists${collidingIds ? '' : '-no-collision'}`);
+      if (source === 'resync') {
+        await resolve(page, 'runtime-list', 'outgoing');
+        await page.evaluate(() => window.selectionTest.emit('resync'));
+        await expect.poll(() => page.evaluate(() => window.selectionTest.pending().some(request => request.kind === 'runtime-list' && request.id === 'outgoing'))).toBe(true);
+      }
+      await page.evaluate(() => window.selectionTest.emit('host'));
+      await resolve(page, 'expanded', 'host');
+      await resolve(page, 'runtime-list', 'incoming');
+      await resolve(page, 'memory', 'incoming');
+      await expect(page).toHaveTitle(/incoming Pane A/);
+      for (let index = 0; index < 5 && await page.evaluate(() => window.selectionTest.runtimeRefreshes()) === 0; index += 1) {
+        await resolve(page, 'panels', 'a');
+      }
+      await expect.poll(() => page.evaluate(() => window.selectionTest.runtimeRefreshes())).toBe(1);
+      expect(await state(page)).toMatchObject({ route: 'sessions', pane: 'a' });
+      await resolve(page, 'runtime-list', 'outgoing');
+      await expect(page).toHaveTitle(/incoming Pane A/);
+      expect(await state(page)).toMatchObject({ route: 'sessions', pane: 'a' });
+      expect(await page.evaluate(() => window.selectionTest.runtimeRefreshes())).toBe(1);
+    });
+  }
+}

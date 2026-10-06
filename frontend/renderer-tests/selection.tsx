@@ -30,15 +30,24 @@ const records: OrchestrationSessionRecord[] = ['a', 'b'].map(id => ({ id, name: 
 const list = (id = 'a') => ({ success: true, data: { sessions: records, selectedSessionId: id } });
 const defaultMethod = () => Promise.resolve({ success: true, data: null });
 const methods = new Proxy({}, { get: () => defaultMethod });
+function runtimeConfig(): AppConfig {
+  const config = useConfigStore.getState().config;
+  if (!config) throw new Error('Fixture config not initialized');
+  const remoteDaemon = config.remoteDaemon ?? createDefaultRemoteDaemonConfig();
+  return { ...config, remoteDaemon: { ...remoteDaemon, client: { ...remoteDaemon.client,
+    profiles: [{ id: 'outgoing', label: 'Outgoing', token: 'test', baseUrl: 'https://outgoing.example', transport: 'http+sse' }, { id: 'incoming', label: 'Incoming', token: 'test', baseUrl: 'https://incoming.example', transport: 'http+sse' }], mode: 'remote', activeProfileId: runtime } } };
+}
+let runtimeRefreshes = 0;
+window.addEventListener('project-sessions-refresh', () => { runtimeRefreshes += 1; });
 const api = {
   invoke: (channel: string, id: string) => channel === 'panels:shouldAutoCreate' ? Promise.resolve(false) : channel === 'panels:get-layout' ? wait('layout', id) : defaultMethod(),
   events: new Proxy({}, { get: (_target, key) => (listener: (event: RuntimeEvent) => void) => { const listeners = handlers.get(key) ?? new Set(); listeners.add(listener); handlers.set(key, listeners); return () => { listeners.delete(listener); }; } }),
   orchestrationSessions: { list: () => location.search.includes('events') ? wait('list', 'a') : Promise.resolve(list()), select: (selector: { sessionId: string }) => wait('select', selector.sessionId), get: (selector: { sessionId: string }) => wait('get', selector.sessionId), overview: (selector: { sessionId: string }) => Promise.resolve({ success: true, data: { session: records.find(record => record.id === selector.sessionId), status: { state: 'idle' }, panes: [], activity: [], refreshedAt: '2026-01-01' } }) },
   terminal: methods,
   panels: { ...methods, getSessionPanels: (id: string) => wait('panels', id), setActivePanel: defaultMethod },
-  config: { get: () => Promise.resolve({ success: true, data: useConfigStore.getState().config }) },
-  uiState: { ...methods, getExpanded: () => wait('expanded', 'host'), getSessionWorkspaceLayout: () => location.search.includes('hydrate') ? wait('workspace', 'host') : Promise.resolve({ success: true, data: location.search.includes('tiles') ? { version: 1, root: { type: 'split', id: 'split', direction: 'row', sizes: [0.5, 0.5], children: [{ type: 'session', id: 'tile-a', sessionId: 'a' }, { type: 'session', id: 'tile-b', sessionId: 'b' }] }, focusedTileId: 'tile-a' } : null }), saveSessionWorkspaceLayout: defaultMethod, saveExpandedProjects: defaultMethod },
-  sessions: { getConversationMessageCount: () => Promise.resolve({ success: true, data: 0 }), getGitCommands: () => Promise.resolve({ success: true, data: [] }), getOutput: () => Promise.resolve({ success: true, data: [] }), getJsonMessages: defaultMethod, getStatistics: defaultMethod, hasChangesToRebase: () => Promise.resolve({ success: true, data: false }), hasStash: () => Promise.resolve({ success: true, data: false }), get: (id: string) => wait('pane', id), getAll: () => Promise.resolve({ success: true, data: location.search.includes('runtime') ? [] : panes }), markViewed: defaultMethod },
+  config: { get: () => Promise.resolve({ success: true, data: location.search.includes('lists') ? runtimeConfig() : useConfigStore.getState().config }) },
+  uiState: { ...methods, getExpanded: () => wait('expanded', 'host'), getNavigationMemory: (hostId: string | null) => location.search.includes('lists') ? wait('memory', hostId ?? 'local') : defaultMethod(), saveNavigationMemory: defaultMethod, getSessionWorkspaceLayout: () => location.search.includes('hydrate') ? wait('workspace', 'host') : Promise.resolve({ success: true, data: location.search.includes('tiles') ? { version: 1, root: { type: 'split', id: 'split', direction: 'row', sizes: [0.5, 0.5], children: [{ type: 'session', id: 'tile-a', sessionId: 'a' }, { type: 'session', id: 'tile-b', sessionId: 'b' }] }, focusedTileId: 'tile-a' } : null }), saveSessionWorkspaceLayout: defaultMethod, saveExpandedProjects: defaultMethod },
+  sessions: { getConversationMessageCount: () => Promise.resolve({ success: true, data: 0 }), getGitCommands: () => Promise.resolve({ success: true, data: [] }), getOutput: () => Promise.resolve({ success: true, data: [] }), getJsonMessages: defaultMethod, getStatistics: defaultMethod, hasChangesToRebase: () => Promise.resolve({ success: true, data: false }), hasStash: () => Promise.resolve({ success: true, data: false }), get: (id: string) => wait('pane', id), getAll: () => location.search.includes('lists') ? wait('runtime-list', runtime) : Promise.resolve({ success: true, data: location.search.includes('runtime') ? [] : panes }), markViewed: defaultMethod },
   projects: { resolveRunScript: defaultMethod, resolveSetupScript: defaultMethod, getAll: () => Promise.resolve({ success: true, data: [{ id: 1, name: 'Test', path: '/test' }] }), get: () => Promise.resolve({ success: true, data: { id: 1, name: 'Test', path: '/test' } }) },
   appearanceSnapshot: undefined,
   getPlatform: () => Promise.resolve('linux'),
@@ -67,12 +76,14 @@ Object.assign(window, { selectionTest: {
     const index = (kind === 'workspace' || kind === 'list') ? pending.map(item => item.kind === kind && item.id === id).lastIndexOf(true) : pending.findIndex(item => item.kind === kind && item.id === id);
     if (index < 0) throw new Error(`No ${kind} ${id} request`);
     const [request] = pending.splice(index, 1);
-    request.resolve(error ? { success: false, error } : kind === 'pane' ? { success: true, data: { ...panes[0], name: `${request.runtime} Pane A` } } : kind === 'select' ? list(id) : kind === 'get' ? { success: true, data: { session: records.find(record => record.id === id), internalSession: { ...panes.find(pane => pane.id === id), id: `internal-${id}`, isHidden: true }, panel: { id: `codex-${id}`, sessionId: `internal-${id}`, type: 'terminal', title: `Agent ${id}`, state: { isActive: true, isVisible: true, customState: { agentType: 'codex', isInitialized: false } }, metadata: { position: 0 } }, agent: 'codex', cwd: '/test', guidePath: '/test/guide', started: false } } : kind === 'list' ? list('a') : kind === 'workspace' ? { success: true, data: { version: 1, root: { type: 'session', id: 'tile-a', sessionId: 'a' }, focusedTileId: 'tile-a' } } : kind === 'panels' ? { success: true, data: [] } : { success: true, data: null });
+    request.resolve(error ? { success: false, error } : kind === 'memory' ? { success: true, data: { view: 'sessions', paneId: 'a', projectId: null } } : kind === 'runtime-list' ? { success: true, data: [{ ...panes[request.runtime === 'outgoing' && location.search.includes('no-collision') ? 1 : 0], name: `${request.runtime} Pane A` }] } : kind === 'pane' ? { success: true, data: { ...panes[0], name: `${request.runtime} Pane A` } } : kind === 'select' ? list(id) : kind === 'get' ? { success: true, data: { session: records.find(record => record.id === id), internalSession: { ...panes.find(pane => pane.id === id), id: `internal-${id}`, isHidden: true }, panel: { id: `codex-${id}`, sessionId: `internal-${id}`, type: 'terminal', title: `Agent ${id}`, state: { isActive: true, isVisible: true, customState: { agentType: 'codex', isInitialized: false } }, metadata: { position: 0 } }, agent: 'codex', cwd: '/test', guidePath: '/test/guide', started: false } } : kind === 'list' ? list('a') : kind === 'workspace' ? { success: true, data: { version: 1, root: { type: 'session', id: 'tile-a', sessionId: 'a' }, focusedTileId: 'tile-a' } } : kind === 'panels' ? { success: true, data: [] } : { success: true, data: null });
   },
-  emit: (kind: 'host' | 'pane') => {
+  emit: (kind: 'host' | 'pane' | 'resync') => {
     if (kind === 'host') { runtime = 'incoming'; handlers.get('onRemoteDaemonResyncRequested')?.forEach(listener => listener({ hostChanged: true })); }
+    else if (kind === 'resync') handlers.get('onRemoteDaemonResyncRequested')?.forEach(listener => listener({ hostChanged: false }));
     else handlers.get('onPaneFocusRequested')?.forEach(listener => listener({ paneId: 'a' }));
   },
+  runtimeRefreshes: () => runtimeRefreshes,
   state: () => ({ route: useNavigationStore.getState().activeView, session: useOrchestrationSessionStore.getState().selectedSessionId, pane: useSessionStore.getState().activeSessionId }),
 } });
 function RuntimeEvents() { useIPCEvents(); return null; }
