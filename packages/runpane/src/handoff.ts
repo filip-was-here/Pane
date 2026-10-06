@@ -4,8 +4,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { boundary, decodeBoundary } from './boundaryDecoder';
 import type { ParsedArgs, RunpaneAgent } from './commands';
-import { invokeRemoteDaemon } from './daemonClient';
-import { buildPaneCreateRequest } from './localControl';
+import { getPaneDaemonEndpoint, resolvePaneDirectory, invokeRemoteDaemon } from './daemonClient';
+import { buildPaneCreateRequest, initialInputSchema } from './localControl';
 import { RUNPANE_CONTRACT } from './generated/contract';
 import { readTailnet, resolveMachine, workspaceTarget, type TailnetMachine } from './workspace';
 
@@ -300,6 +300,7 @@ const paneCreateSchema = boundary.object({
     panelId: boundary.optional(boundary.string),
     name: boundary.optional(boundary.string),
     worktreePath: boundary.optional(boundary.string),
+    initialInput: boundary.optional(initialInputSchema),
     error: boundary.optional(boundary.object({ message: boundary.string })),
   })),
 });
@@ -308,6 +309,7 @@ const paneCreateSchema = boundary.object({
 interface Destination {
   name: string;
   shell: string;
+  os: 'macOS' | 'Windows' | 'Linux';
   run(command: string[], timeoutMs?: number): Promise<{ exitCode: number | null; stdout: string; stderr: string }>;
   write(target: string, content: string): Promise<string>;
 }
@@ -315,6 +317,8 @@ interface Destination {
 async function remoteDestination(machine: TailnetMachine): Promise<Destination> {
   const target = workspaceTarget(machine);
   const probe = await invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command: 'echo runpane-handoff', timeoutMs: 20_000 }], execResultSchema);
+  if (probe.exitCode !== 0) throw new Error(`Could not execute on ${machine.name}: ${probe.stderr || probe.stdout}`);
+  if (machine.self && probe.os !== 'Windows') throw new Error(`Expected the Windows host, but ${machine.name} reports ${probe.os}. Nothing was committed or sent.`);
   const shell = probe.shell;
   // cmd has expansion rules that cannot safely represent arbitrary terminal prompts.
   if (!/^(bash|zsh|sh|fish|pwsh|powershell)(?:\.exe)?$/i.test(path.posix.basename(shell.replace(/\\/g, '/')))) {
@@ -323,6 +327,7 @@ async function remoteDestination(machine: TailnetMachine): Promise<Destination> 
   return {
     name: machine.name,
     shell,
+    os: probe.os,
     run: (argv, timeoutMs = 120_000) =>
       invokeRemoteDaemon(target, 'runpane:machine:exec', [{ command: argv.map((arg) => quote(arg, shell)).join(' '), timeoutMs }], execResultSchema, timeoutMs + 30_000),
     write: async (file, content) =>
@@ -333,6 +338,7 @@ async function remoteDestination(machine: TailnetMachine): Promise<Destination> 
 function localDestination(name: string): Destination {
   return {
     name,
+    os: process.platform === 'win32' ? 'Windows' : process.platform === 'darwin' ? 'macOS' : 'Linux',
     shell: process.platform === 'win32' ? 'powershell' : (process.env.SHELL ?? 'sh'),
     run: (command, timeoutMs = 120_000) => new Promise((resolve) => {
       const child = spawn(command[0], command.slice(1), { shell: false, timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -375,6 +381,10 @@ async function findRepo(destination: Destination, runpane: string[], state: GitS
   if (selector && !candidates.length) throw new Error(`${destination.name} has no saved repository "${selector}". Its repositories: ${listed.repos.map((repo) => repo.name).join(', ')}.`);
   const wanted = repositorySlug(state.remoteUrl)?.toLowerCase();
   for (const repo of candidates) {
+    if (repo.environment?.toLowerCase() === 'wsl' || /^[\\/]{2}wsl(?:\$|\.localhost)[\\/]/i.test(repo.path)) {
+      if (selector) throw new Error(`Saved repository "${repo.name}" is in WSL. Select a native Windows repository instead. Nothing was committed or sent.`);
+      continue;
+    }
     const remotes = await destination.run(['git', '-C', repo.path, 'remote', '-v'], 20_000);
     if (remotes.exitCode !== 0) continue;
     const match = remotes.stdout.split('\n').map((line) => line.split(/\s+/))
@@ -422,11 +432,11 @@ function receiverInstructions(origin: NoteOrigin, state: GitState, remote: strin
 interface HandoffResult {
   ok: boolean;
   dryRun: boolean;
-  destination: HandoffDestination;
+  destination: HandoffDestination & { name?: string; os?: Destination['os'] };
   note?: { path: string; sections: number; bytes: number };
   git: { repository: string; branch: string; head: string; remote: string; pushed: boolean; dirty: number };
   warnings: string[];
-  repo?: { id: number; name: string; path: string };
+  repo?: { id: number; name: string; path: string; environment: string };
   notePath?: string;
   pane?: { id: string; panelId: string; name?: string; worktreePath?: string };
   reportBack?: string;
@@ -484,6 +494,27 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   }
 
   let state = withoutNote(readGitState(cwd), parsed.handoffNoteFile);
+  let target = destination.machine ? machines.find((machine) => machine.name === destination.machine) : undefined;
+  // WSL and its Windows host share the Tailnet identity, but not daemon sockets.
+  // Reuse host workspace execution only when there is no local daemon and no
+  // explicit instance selection. A selected instance must never change silently.
+  if (!target && process.platform === 'linux' && insideWSL()
+    && !parsed.paneDir && !process.env.PANE_DIR && !process.env.FOOZOL_DIR
+    && !fs.existsSync(getPaneDaemonEndpoint(resolvePaneDirectory()).path)
+    && tailnet.ok && tailnet.self.os === 'Windows') {
+    target = tailnet.self;
+  }
+  const remote = target ? await remoteDestination(target) : localDestination(self);
+  const installed = await remote.run(['runpane', '--version'], 30_000);
+  if (target && parsed.dryRun && installed.exitCode !== 0) throw new Error(`Install runpane on ${remote.name} before retrying the dry run; no CLI was installed and nothing was sent.`);
+  const runpane = target
+    ? (installed.exitCode === 0 ? ['runpane'] : ['npx', '--yes', 'runpane@latest'])
+    : (process.platform === 'win32' || (process.platform === 'linux' && insideWSL()) || installed.exitCode !== 0 ? [process.execPath, path.join(__dirname, 'cli.js')] : ['runpane']);
+  if (!target && parsed.paneDir) runpane.push('--pane-dir', parsed.paneDir);
+  // `runpane workspace` arrived in 2.4.164; an older runpane there reports back through npx.
+  const reporter = installed.exitCode === 0 && versionAtLeast(installed.stdout, [2, 4, 164]) ? 'runpane' : 'npx --yes runpane@latest';
+  const { repo, remote: repoRemote } = await findRepo(remote, runpane, state, parsed.repo);
+  say(step('repo', `${repo.name} (${repo.path}), ${repo.environment ?? 'native'}, ${remote.os}, remote ${repoRemote}`));
   if (parsed.handoffPush && !parsed.dryRun && (!state.pushed || state.dirty.length)) {
     state = pushWork(state, machineLabel, parsed.handoffNoteFile);
   }
@@ -494,7 +525,8 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   const result: HandoffResult = {
     ok: true,
     dryRun: parsed.dryRun,
-    destination,
+    destination: { ...destination, name: remote.name, os: remote.os },
+    repo: { id: repo.id, name: repo.name, path: repo.path, environment: repo.environment ?? 'native' },
     note: noteInfo,
     git: { repository: state.repository, branch: state.branch, head: state.head, remote: state.remote, pushed: state.pushed, dirty: state.dirty.length },
     warnings,
@@ -508,17 +540,6 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
   if (!state.pushed) throw new Error(`${warnings.join(' ')}\nThe receiver would start without your work, so nothing was sent.`);
   for (const warning of warnings) say(`  ! ${warning}`);
 
-  const target = destination.machine ? machines.find((machine) => machine.name === destination.machine) : undefined;
-  const remote = target ? await remoteDestination(target) : localDestination(self);
-  const installed = await remote.run(['runpane', '--version'], 30_000);
-  const runpane = target
-    ? (installed.exitCode === 0 ? ['runpane'] : ['npx', '--yes', 'runpane@latest'])
-    : (process.platform === 'win32' || installed.exitCode !== 0 ? [process.execPath, path.join(__dirname, 'cli.js')] : ['runpane']);
-  if (!target && parsed.paneDir) runpane.push('--pane-dir', parsed.paneDir);
-  // `runpane workspace` arrived in 2.4.164; an older runpane there reports back through npx.
-  const reporter = installed.exitCode === 0 && versionAtLeast(installed.stdout, [2, 4, 164]) ? 'runpane' : 'npx --yes runpane@latest';
-  const { repo, remote: repoRemote } = await findRepo(remote, runpane, state, parsed.repo);
-  say(step('repo', `${repo.name} (${repo.path}), remote ${repoRemote}`));
   await mustRun(remote, ['git', '-C', repo.path, 'fetch', repoRemote, state.branch], 'git fetch', 120_000);
 
   await mustRun(remote, ['git', '-C', repo.path, 'cat-file', '-e', `${state.head}^{commit}`], 'verify sender commit');
@@ -560,21 +581,30 @@ export async function runHandoff(parsed: ParsedArgs): Promise<number> {
       const detail = (response.stderr || response.stdout).trim().split('\n').slice(-3).join(' ');
       throw new Error(`runpane panes create failed on ${remote.name}: ${detail || `exit ${response.exitCode}`}`);
     }
-    if (response.exitCode !== 0 && created.items[0]?.ok) {
-      throw new Error(`runpane panes create failed on ${remote.name}: ${response.stderr.trim() || `exit ${response.exitCode}`}`);
-    }
+    if (response.exitCode !== 0) warnings.push(`runpane panes create exited ${response.exitCode} on ${remote.name}${response.stderr.trim() ? `: ${response.stderr.trim()}` : ''}`);
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}. The note was sent to ${notePath}. Check runpane sessions list on ${remote.name} before retrying to avoid a duplicate Pane.`);
   }
   const item = created.items[0];
-  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item?.error?.message ?? 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Check runpane agents status --pane ${item.sessionId} on ${remote.name} before retrying.` : ` Check runpane sessions list on ${remote.name} before retrying.`}`);
-  say(step('started', `${item.name ?? name} on ${remote.name}${item.worktreePath ? ` (${item.worktreePath})` : ''}`));
+  if (!item?.ok || !item.sessionId || !item.panelId) throw new Error(`Pane on ${remote.name} did not start the agent: ${item?.error?.message ?? 'no pane was created'}. The note was sent to ${notePath}.${item?.sessionId ? ` Check runpane agents status --pane ${item.sessionId} on ${remote.name} before retrying.${item.panelId ? ` Inspect panel ${item.panelId}: runpane panels screen --panel ${item.panelId}.` : ''}` : ` Check runpane sessions list on ${remote.name} before retrying.`}`);
 
-  result.repo = { id: repo.id, name: repo.name, path: repo.path };
   result.notePath = notePath;
   result.pane = { id: item.sessionId, panelId: item.panelId, name: item.name, worktreePath: item.worktreePath };
   result.reportBack = noteOrigin.originPanel ? `${self} panel ${noteOrigin.originPanel}` : undefined;
-  const check = `${destination.machine ? `runpane workspace ${remote.name} exec -- ` : ''}runpane agents status --pane ${item.sessionId}`;
+  const inspect = `${target ? `runpane workspace ${quote(remote.name, 'sh')} exec -- ` : ''}runpane panels screen --panel ${quote(item.panelId, 'sh')}`;
+  const input = item.initialInput;
+  const verified = input?.verifiedSubmitted === true
+    && (input.delivery?.state === 'taken' || input.delivery?.state === 'queued')
+    && !input.blocked && !input.error;
+  if (!verified || warnings.some((warning) => warning.startsWith('runpane panes create exited'))) {
+    result.ok = false;
+    warnings.push(`Receiver prompt is not verified submitted on panel ${item.panelId}${input?.blocked?.message || input?.error?.message ? `: ${input.blocked?.message ?? input.error?.message}` : ` (${input?.delivery?.state ?? 'missing delivery evidence'})`}. Pane ${item.sessionId} was created; do not retry blindly. Inspect it: ${inspect}`);
+    for (const warning of warnings) say(`  ! ${warning}`);
+    if (parsed.json) console.log(JSON.stringify(result, null, 2));
+    return 1;
+  }
+  say(step('started', `${item.name ?? name} on ${remote.name}${item.worktreePath ? ` (${item.worktreePath})` : ''}`));
+  const check = `${target ? `runpane workspace ${remote.name} exec -- ` : ''}runpane agents status --pane ${item.sessionId}`;
   say(result.reportBack ? `The receiver reports back to ${result.reportBack}.` : 'No sender panel to report to; the receiver reports on the branch.');
   say(`Check on it: ${check}`);
   if (parsed.json) console.log(JSON.stringify(result, null, 2));
@@ -602,4 +632,13 @@ function step(label: string, detail: string, ok = true): string {
 
 function formatBytes(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+}
+
+function insideWSL(): boolean {
+  if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) return true;
+  try {
+    return /microsoft/i.test(fs.readFileSync('/proc/sys/kernel/osrelease', 'utf8'));
+  } catch {
+    return false;
+  }
 }

@@ -316,6 +316,7 @@ interface PaneCreateFailureItem {
   name?: string;
   sessionId?: string;
   paneId?: string;
+  panelId?: string;
   worktreePath?: string;
   error: { message: string; code?: string };
 }
@@ -990,7 +991,7 @@ const promptWarningsSchema = boundary.optional(boundary.array(boundary.object({
   code: boundary.enumeration('leading-bang-runs-shell', 'leading-hash-memory', 'leading-slash-command', 'leading-at-mention'),
   message: boundary.string,
 })));
-const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.object({
+export const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.object({
   delivered: boundary.boolean,
   submitted: boundary.boolean,
   inputBytes: boundary.number,
@@ -1389,6 +1390,7 @@ export const paneCreateResultSchema: BoundarySchema<PaneCreateResult> = boundary
       name: boundary.optional(boundary.string),
       sessionId: boundary.optional(boundary.string),
       paneId: boundary.optional(boundary.string),
+      panelId: boundary.optional(boundary.string),
       worktreePath: boundary.optional(boundary.string),
       error: boundary.object({
       message: boundary.string,
