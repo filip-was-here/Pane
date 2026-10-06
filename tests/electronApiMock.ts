@@ -372,6 +372,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         if (prop === 'onTerminalOutput') {
           return (callback: MockEventCallback) => subscribe('terminal-output', callback);
         }
+        if (prop === 'onTerminalCliReady') {
+          return (callback: MockEventCallback) => subscribe('terminal:cliReady', callback);
+        }
         if (prop === 'onTerminalFontUpdated') {
           return (callback: MockEventCallback) => subscribe('config:terminal-font-updated', callback);
         }
@@ -1225,6 +1228,9 @@ export async function installElectronApiMock(page: Page, options: ElectronApiMoc
         },
         emitPanelTerminalOutput(sessionId: string, panelId: string, output: string) {
           emit('terminal-output', { sessionId, panelId, output });
+        },
+        emitTerminalCliReady(panelId: string) {
+          emit('terminal:cliReady', { panelId });
         },
         getTerminalAckedBytes() {
           return terminalAckedBytes;
