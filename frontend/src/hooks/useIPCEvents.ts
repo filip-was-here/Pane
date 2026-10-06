@@ -23,12 +23,15 @@ type ValidatedEventData = SessionEventData | SessionOutput;
 
 async function reloadRemoteRuntimeState(loadSessions: (sessions: Session[]) => void, hostChanged: boolean): Promise<void> {
   if (hostChanged) {
+    // Invalidate outgoing Session requests and tile memory before any host read.
+    useOrchestrationSessionStore.getState().invalidateHost();
+    useSessionStore.getState().invalidateHost();
+    usePanelStore.setState({ panels: {}, activePanels: {}, layouts: {}, focusedGroupIds: {},
+      agentStatus: {}, agentStatusSession: {}, agentStatusSnapshotVersion: 0, activityStatus: {}, lastActivityAt: {}, unviewedCompletedActivity: {} });
+    useSessionWorkspaceLayoutStore.getState().reset();
     // Main keeps expanded repositories per host; load them before the new host's repositories arrive.
     const uiState = await window.electronAPI.uiState.getExpanded();
     useNavigationStore.getState().resetExpandedProjectsForHost(uiState.success ? uiState.data?.expandedProjects ?? [] : []);
-    // Session tiling is per host too, and its Session ids belong to the host we
-    // are leaving. Drop it so the incoming host hydrates its own.
-    useSessionWorkspaceLayoutStore.getState().reset();
   }
   // Repository ids are per host, so another host's repository view is meaningless.
   if (hostChanged && useNavigationStore.getState().activeView === 'project') {

@@ -76,6 +76,11 @@ install's data:
   in the real repositories it lists. Use a fresh data directory unless you need
   real data.
 
+The renderer selection race tests run with `PANE_DIR=/tmp/pane_test pnpm test:renderer-selection`.
+They mount the production sidebar and views in Chromium with a controllable Electron transport;
+they do not launch Electron or use a Pane data directory. Install Chromium with
+`pnpm exec playwright install chromium` first.
+
 ### Native modules
 
 `better-sqlite3-multiple-ciphers` is compiled for one runtime at a time.

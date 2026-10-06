@@ -137,11 +137,13 @@ export function OrchestrationSessionNav({
 
   const openSession = useCallback(async (sessionId: string) => {
     setActionError(null);
+    // Navigation belongs to the click, never to the order of remote replies.
+    void setActiveSession(null);
+    navigateToPaneChat();
     try {
       await select({ sessionId });
-      setActiveSession(null);
-      navigateToPaneChat();
     } catch (cause) {
+      if (useOrchestrationSessionStore.getState().selectedSessionId !== sessionId) return;
       setActionError(cause instanceof Error ? cause.message : 'Failed to open Session');
     }
   }, [navigateToPaneChat, select, setActiveSession]);
