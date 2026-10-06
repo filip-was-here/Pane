@@ -5183,10 +5183,10 @@ describe('runpane IPC handlers', () => {
             waitReady && toolKind !== 'custom',
           );
           if (waitReady && toolKind !== 'custom' && inputCase.name !== 'slash') {
-            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} unverified launch result`).toMatchObject({
+            expect(result.items[0], `${toolKind}/${waitReady}/${inputCase.name} delivery result`).toMatchObject({
               ok: true,
               initialInput: {
-                verifiedSubmitted: false,
+                verifiedSubmitted: toolKind === 'opencode',
               },
             });
           }
