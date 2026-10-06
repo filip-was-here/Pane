@@ -62,3 +62,14 @@ it('allows the reader to cancel a full-file stream', async () => {
   expect(response.status).toBe(200);
   await response.body?.cancel();
 });
+
+it.each([['.svg', 'image/svg+xml'], ['.avif', 'image/avif'], ['.pdf', 'application/pdf'], ['.woff2', 'font/woff2']])('streams %s with its native MIME type and fetch headers', async (extension, mime) => {
+  const pathWithType = path.join(directory, `preview${extension}`);
+  await fs.writeFile(pathWithType, '0123456789');
+  const response = await streamMediaFile(pathWithType, new Request('https://preview', { headers: { Range: 'bytes=0-3' } }));
+  expect(response.status).toBe(206);
+  expect(response.headers.get('Content-Type')).toBe(mime);
+  expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Content-Range');
+  expect(response.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+  expect(await response.text()).toBe('0123');
+});

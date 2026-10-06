@@ -3,6 +3,13 @@ import { extname } from 'path';
 import { Readable } from 'stream';
 
 const MIME_TYPES = new Map([
+  ['.png', 'image/png'], ['.jpg', 'image/jpeg'], ['.jpeg', 'image/jpeg'],
+  ['.svg', 'image/svg+xml'], ['.webp', 'image/webp'], ['.avif', 'image/avif'],
+  ['.gif', 'image/gif'], ['.ico', 'image/x-icon'], ['.bmp', 'image/bmp'],
+  ['.pdf', 'application/pdf'], ['.ttf', 'font/ttf'], ['.otf', 'font/otf'],
+  ['.woff', 'font/woff'], ['.woff2', 'font/woff2'],
+  ['.html', 'text/html'], ['.htm', 'text/html'],
+
   ['.mp4', 'video/mp4'], ['.m4v', 'video/mp4'], ['.mov', 'video/quicktime'],
   ['.webm', 'video/webm'], ['.mkv', 'video/x-matroska'], ['.ogg', 'video/ogg'], ['.ogv', 'video/ogg'],
   ['.mp3', 'audio/mpeg'], ['.wav', 'audio/wav'], ['.m4a', 'audio/mp4'],
@@ -20,6 +27,9 @@ export async function streamMediaFile(filePath: string, request: Request): Promi
       'Content-Type': MIME_TYPES.get(extname(filePath).toLowerCase()) ?? 'application/octet-stream',
       'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Expose-Headers': 'Content-Range, Content-Length',
+      'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:",
     });
     let start = 0;
     let end = size - 1;

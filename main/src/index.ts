@@ -20,7 +20,7 @@ import { app, protocol } from 'electron';
 
 protocol.registerSchemesAsPrivileged([{
   scheme: 'pane-media',
-  privileges: { standard: true, secure: true, stream: true },
+  privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true },
 }]);
 
 if (process.platform === 'darwin') {

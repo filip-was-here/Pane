@@ -64,17 +64,31 @@ Agent status (working, idle, blocked) is derived in
 ## File previews
 
 `FileEditorView.tsx` routes editor tabs from the Files inspector, terminal links,
-and `runpane panels open --file`. Images/PDFs use blob previews. Local video and
-audio use native media controls through `pane-media`, registered in
+and `runpane panels open --file` using `shared/utils/filePreview.ts`. Supported
+formats open read-only; ordinary code and text retain the editor and auto-save.
+Images, PDFs, fonts, video and audio load through `pane-media`, registered in
 `main/src/services/mediaPreview.ts`. A revocable URL grants access to one file;
 each request rechecks the existing worktree/symlink boundary through
-`file:getPath`. `mediaStream.ts` streams byte ranges from disk for seeking.
-Media never passes through text/base64 IPC. Remote-host media currently shows
-an unavailable notice instead of reading the client's disk.
+`file:getPath`. `mediaStream.ts` streams byte ranges from disk. File bodies do
+not pass through text/base64 IPC. Remote-host previews show an unavailable notice.
+
+Markdown, HTML, CSV/TSV and structured text fetch at most 1 MiB. Markdown renders
+with a source toggle. HTML renders in a script-disabled sandbox with external
+loads blocked; use `panels open --url` for an intentional live browser tab.
+Tables display at most 500 data rows and 100 columns. JSON/JSONL are formatted;
+YAML/TOML retain source formatting in read-only Monaco with folding. Fonts use
+a temporary FontFace specimen. Decode failures offer system open/reveal actions.
+
+`filePreviewListing.ts` lists ZIP central directories (up to 4 MiB) and TAR
+headers without extraction, with at most 1,000 entries. ZIP64/split ZIP and
+compressed TAR are unsupported; extended TAR names are not expanded. SQLite
+lists tables/views from a bounded temporary copy (32 MiB), opened read-only and
+removed afterward. Active WAL databases are refused; no source sidecars are
+created. No table data queries are executed.
 
 `file:read` samples at most 8 KiB before decoding UTF-8. Binary files show a
 read-only notice, and `file:write` refuses to overwrite binary content as text.
-Media extensions always bypass the editor, including unsupported codecs.
+Preview components never enter the editable auto-save path, even on errors.
 
 ## Data
 

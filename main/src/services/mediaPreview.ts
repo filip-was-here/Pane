@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto';
 import { ipcMain, protocol, shell } from 'electron';
 import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDecoder';
-import { mediaFileKind } from '../../../shared/utils/mediaFile';
+import { filePreviewKind } from '../../../shared/utils/filePreview';
+import { listArchive, listSqlite } from './filePreviewListing';
 import type { PaneCommandRegistry, PaneCommandValue } from '../daemon/commandRegistry';
 import { remotePaneClientController } from '../daemon/client/remotePaneClient';
 import { streamMediaFile } from './mediaStream';
@@ -16,7 +17,7 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
   const owners = new Set<number>();
   const requireLocal = () => {
     if (remotePaneClientController.getConnectionState().mode === 'remote') {
-      throw new Error('Media preview is only available on the local host');
+      throw new Error('File preview is only available on the local host');
     }
   };
   const resolve = async (request: { sessionId: string; filePath: string }) => {
@@ -27,9 +28,9 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
     return result;
   };
 
-  ipcMain.handle('file:media-preview', async (event, raw: PaneCommandValue) => {
+  ipcMain.handle('file:preview-url', async (event, raw: PaneCommandValue) => {
     const request = decodeBoundary(raw, requestSchema);
-    if (!mediaFileKind(request.filePath)) throw new Error('Not a media file');
+    if (!filePreviewKind(request.filePath)) throw new Error('No preview for this file type');
     await resolve(request);
     if (event.sender.isDestroyed()) throw new Error('Preview closed');
     const token = randomUUID();
@@ -44,10 +45,18 @@ export function registerMediaPreview(commandRegistry: PaneCommandRegistry): void
     }
     return `pane-media://preview/${token}`;
   });
-  ipcMain.handle('file:release-media-preview', (event, rawUrl: PaneCommandValue) => {
+  ipcMain.handle('file:release-preview', (event, rawUrl: PaneCommandValue) => {
     const url = decodeBoundary(rawUrl, boundary.string);
     const token = url.replace('pane-media://preview/', '');
     if (grants.get(token)?.owner === event.sender.id) grants.delete(token);
+  });
+  ipcMain.handle('file:preview-list', async (_event, raw: PaneCommandValue) => {
+    const request = decodeBoundary(raw, requestSchema);
+    const kind = filePreviewKind(request.filePath);
+    const file = await resolve(request);
+    if (kind === 'archive') return listArchive(file.path);
+    if (kind === 'sqlite') return listSqlite(file.path);
+    throw new Error('No listing for this file type');
   });
   ipcMain.handle('file:preview-action', async (_event, raw: PaneCommandValue, rawAction: PaneCommandValue) => {
     const action = decodeBoundary(rawAction, boundary.enumeration('open', 'reveal'));

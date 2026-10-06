@@ -3770,7 +3770,6 @@ type PanelOpenTarget =
   | { type: 'editor'; title: string; filePath: string; customState: EditorPanelState };
 
 const PANEL_OPEN_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:']);
-const HTML_FILE_PATTERN = /\.html?$/iu;
 
 async function resolvePanelOpenUrl(rawUrl: string, services: AppServices, pane: Session): Promise<PanelOpenTarget> {
   let parsed: URL;
@@ -3828,9 +3827,6 @@ async function resolvePanelOpenFile(services: AppServices, pane: Session, rawPat
 
   const filePath = relativePath.split(path.sep).join('/');
   const title = path.basename(relativePath);
-  if (HTML_FILE_PATTERN.test(relativePath)) {
-    return { type: 'browser', title, filePath, customState: { currentUrl: pathToFileURL(fullPath).href } };
-  }
   return { type: 'editor', title, filePath, customState: { filePath, isPreview: false, isDirty: false } };
 }
 
