@@ -50,6 +50,50 @@ it('lists TAR headers while skipping payload bytes', async () => {
   await expect(listArchive(path)).rejects.toThrow('checksum');
 });
 
+it.each(['zip', 'tar'])('limits a %s listing to 1,000 entries without extracting files', async extension => {
+  const path = join(directory, `many.${extension}`);
+  const entries = Array.from({ length: 1001 }, (_, index) => {
+    const name = Buffer.from(`entry-${index}`);
+    if (extension === 'zip') {
+      const header = Buffer.alloc(46);
+      header.writeUInt32LE(0x02014b50); header.writeUInt16LE(name.length, 28);
+      return Buffer.concat([header, name]);
+    }
+    const header = Buffer.alloc(512);
+    name.copy(header); header.write('00000000000\0', 124); header.fill(32, 148, 156);
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148);
+    return header;
+  });
+  const end = Buffer.alloc(extension === 'zip' ? 22 : 1024);
+  if (extension === 'zip') {
+    end.writeUInt32LE(0x06054b50); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(entries.reduce((sum, entry) => sum + entry.length, 0), 12);
+  }
+  await writeFile(path, Buffer.concat([...entries, end]));
+  const listing = await listArchive(path);
+  expect(listing.rows).toHaveLength(1000);
+  expect(listing.rows.at(-1)).toEqual(['entry-999', '0', 'File']);
+  expect(listing.notice).toContain('Limited to 1,000 entries');
+  expect(await readdir(directory)).toEqual([`many.${extension}`]);
+});
+
+it.each([
+  ['oversized directory', 12, 4 * 1024 * 1024 + 1, '4 MiB'],
+  ['ZIP64 size', 12, 0xffffffff, 'ZIP64'],
+  ['ZIP64 offset', 16, 0xffffffff, 'ZIP64'],
+  ['ZIP64 count', 10, 65535, 'ZIP64'],
+  ['split disk', 4, 1, 'split ZIP'],
+  ['split directory', 6, 1, 'split ZIP'],
+] as const)('refuses a ZIP with %s before reading its directory', async (_label, offset, value, error) => {
+  const path = join(directory, 'unsupported.zip');
+  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50);
+  if (offset >= 12) end.writeUInt32LE(value, offset);
+  else end.writeUInt16LE(value, offset);
+  await writeFile(path, end);
+  await expect(listArchive(path)).rejects.toThrow(error);
+});
+
 it.each(['bad.zip', 'bad.tar', 'bad.sqlite'])('fails clearly for malformed %s', async name => {
   const path = join(directory, name); await writeFile(path, 'bad data');
   await expect(name.endsWith('sqlite') ? listSqlite(path) : listArchive(path)).rejects.toThrow();
