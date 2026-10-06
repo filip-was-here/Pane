@@ -191,7 +191,7 @@ export function FileEditorView({
   }, [autoSaveRef, onUserEdit]);
 
   const handleEditorChange = (value: string | undefined) => {
-    if (isReadOnlyPreview || loading || selectedFile?.path !== filePath) return;
+    if (isReadOnlyPreview || selectedFile?.path !== filePath) return;
     editRevision.current += 1;
     const content = value || '';
     dispatch({ type: 'edit', content });
@@ -218,7 +218,10 @@ export function FileEditorView({
     // Invalidate it before the same-path check: A → B → A while B is loading
     // must not let B's response land on top of the A that is still shown.
     loadSeqRef.current += 1;
-    if (selectedFile?.path === filePath) return;
+    if (selectedFile?.path === filePath) {
+      dispatch({ type: 'load-cancelled' });
+      return;
+    }
     autoSave.flush();
     positionTrackerRef.current?.cancel();
     void loadFile({ name: filePath.split(/[\\/]/).pop() || '', path: filePath, isDirectory: false });
@@ -311,6 +314,7 @@ export function FileEditorView({
               onChange={handleEditorChange}
               onMount={handleEditorMount}
               options={{
+                readOnly: selectedFile.path !== filePath,
                 minimap: { enabled: true },
                 fontSize: 14,
                 wordWrap: 'on',
