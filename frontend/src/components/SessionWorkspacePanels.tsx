@@ -110,9 +110,13 @@ export function SessionWorkspacePanels({
   const agentPanelIdSet = useMemo(() => new Set(agentPanelIds), [agentPanelIds]);
   const terminal = panels.find(panel => panel.type === 'terminal' && !agentPanelIdSet.has(panel.id) && !isStagePanel(panel, agentPanelIdSet, inLayout));
   const explorer = panels.find(panel => panel.type === 'explorer');
+  // Readiness may arrive while the initial layout is loading, before the
+  // terminal subscribes. Use the live record after this visit's load finishes;
+  // until then the store may still contain a previous visit or host's record.
+  const currentAgentPanel = (loaded && panels.find(panel => panel.id === agentPanel.id)) || agentPanel;
   const tabs = useMemo(
-    () => [agentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
-    [agentPanel, panels, agentPanelIdSet, inLayout],
+    () => [currentAgentPanel, ...panels.filter(panel => isStagePanel(panel, agentPanelIdSet, inLayout))],
+    [currentAgentPanel, panels, agentPanelIdSet, inLayout],
   );
   const agentPanelId = agentPanel.id;
   // The panel events below outlive the render that subscribed them, so they read
@@ -294,7 +298,7 @@ export function SessionWorkspacePanels({
   const primary = layout ? primaryGroup(layout.root) : null;
   const primaryTabs = primary
     ? primary.panelIds.map(id => tabs.find(panel => panel.id === id)).filter((panel): panel is ToolPanel => !!panel)
-    : [agentPanel];
+    : [currentAgentPanel];
   const tabStrip = (
     <div data-testid="session-workspace-tabs" className="flex min-w-0 items-center">
       <PanelTabStrip panels={primaryTabs} activePanelId={primary?.activePanelId ?? agentPanelId} idNamespace={`session-${sessionId}`}
