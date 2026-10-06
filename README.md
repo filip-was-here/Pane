@@ -243,7 +243,7 @@ You can choose Claude, Codex, or Cursor, with a model and, for Claude or Codex, 
 
 The receiver gets instructions to verify the starting commit, continue the note's next steps, push to your original branch, and report back to your sending panel with `runpane workspace <sender> panels submit`. Stop editing that branch after handing it off. If you sent from outside a Pane panel, the instructions use a PR comment or commit message instead.
 
-Mac-to-Windows handoff has passed QA; Windows-to-Mac passed after manual agent startup recovery. Startup can still need attention. See the [handoff guide](main/src/services/paneChatBundle/skills/handoff/SKILL.md) and [CLI options](packages/runpane/README.md#handing-work-to-another-machine).
+See the [handoff guide](main/src/services/paneChatBundle/skills/handoff/SKILL.md) and [CLI options](packages/runpane/README.md#handing-work-to-another-machine).
 
 ---
 
