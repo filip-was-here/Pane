@@ -2071,6 +2071,39 @@ test('New preserves multiple-Pane options while switching repositories', async (
   await expect(page.getByRole('button', { name: /Create 3 Panes/ })).toBeEnabled();
 });
 
+test('first Session load uses persisted readiness when the ready event precedes the terminal', async ({ page }) => {
+  await installSessionsFixture(page, [sessionFixture('early-ready', 'Already ready', '', '', new Date(0).toISOString())]);
+  await page.addInitScript(() => {
+    const invoke = window.electronAPI.invoke;
+    const panel: ToolPanel = {
+      id: '__orchestration_panel_early-ready_claude',
+      sessionId: '__orchestration_session_early-readyterminal__',
+      type: 'terminal', title: 'Already ready · claude',
+      state: { isActive: true, hasBeenViewed: true, customState: { isCliPanel: true, isCliReady: false, isInitialized: true } },
+      metadata: { createdAt: new Date(0).toISOString(), lastActiveAt: new Date(0).toISOString(), position: 0, permanent: true },
+    };
+    window.electronAPI.panels.getSessionPanels = async () => ({ success: true, data: [panel] });
+    window.electronAPI.invoke = async (channel, ...args) => {
+      if (channel === 'panels:get-layout') {
+        // The host is already running the agent while the client loads its layout.
+        // SAFETY: these are the fixture's public host-event controls.
+        const mock = (window as typeof window & { __paneTestElectronMock: {
+          emitPanelUpdated: (panel: ToolPanel) => void;
+          emitTerminalCliReady: (id: string) => void;
+        } }).__paneTestElectronMock;
+        mock.emitPanelUpdated({ ...panel, state: { ...panel.state, customState: { isCliPanel: true, isCliReady: true, isInitialized: true } } });
+        mock.emitTerminalCliReady(panel.id);
+      }
+      return invoke(channel, ...args);
+    };
+  });
+  await page.goto('/');
+  await page.getByTestId('orchestration-session-early-ready').click();
+  await expect(page.locator('.xterm-screen')).toHaveCount(1);
+  await expect(page.getByRole('status', { name: 'Loading terminal' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+});
+
 for (const failure of ['stalled', 'rejected', 'font-stalled'] as const) {
 test(`a ${failure} terminal load offers Retry and recovers without switching Sessions`, async ({ page }) => {
   await page.clock.install();
