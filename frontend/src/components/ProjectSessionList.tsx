@@ -316,6 +316,7 @@ export function ProjectSessionList({
   );
 
   const handleManagedPaneClick = useCallback(async (paneId: string, parentSessionId: string) => {
+    handleSessionClick(paneId, 'orchestration');
     try {
       // Keep the parent Session selected so the top-level Sessions shortcut
       // returns to the conversation that owns the focused Pane.
@@ -323,7 +324,6 @@ export function ProjectSessionList({
     } catch {
       // The Pane remains navigable if the orchestration selection cannot refresh.
     }
-    handleSessionClick(paneId, 'orchestration');
   }, [handleSessionClick, selectOrchestrationSession]);
 
   const renderManagedPane = useCallback((paneId: string, parentSessionId: string) => {

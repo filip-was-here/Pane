@@ -132,15 +132,15 @@ describe('session selection ordering', () => {
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('missing');
   });
 
-  it.each(['not-found', 'disconnected'])('clears an uncached selection when its current fetch fails: %s', async (failure) => {
+  it.each(['not-found', 'disconnected'])('keeps an uncached selection and error when its current fetch fails: %s', async (failure) => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       if (failure === 'disconnected') getSession.mockRejectedValueOnce(new Error('Disconnected'));
       else getSession.mockResolvedValueOnce({ success: false });
       await useSessionStore.getState().setActiveSession('missing');
-      expect(useSessionStore.getState().activeSessionId).toBeNull();
+      expect(useSessionStore.getState().activeSessionId).toBe('missing');
+      expect(useSessionStore.getState().selectionError).toBeTruthy();
       expect(useSessionStore.getState().activeMainRepoSession).toBeNull();
-      expect(invoke).toHaveBeenLastCalledWith('sessions:set-active-session', null);
       expect(markViewed).not.toHaveBeenCalled();
     } finally {
       error.mockRestore();
