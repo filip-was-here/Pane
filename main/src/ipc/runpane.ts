@@ -24,7 +24,7 @@ import { assertNewBranchName } from '../services/worktreeManager';
 import { assessComposerEvidence, isSlashCommandInput, looksLikePendingComposer } from './runpaneComposerEvidence';
 import { projectWorkspaceEntry } from '../services/workspaceJournal';
 import { detectAgentState } from '../services/agentStatus/manifestEngine';
-import { getManifestForAgent } from '../services/agentStatus/manifests';
+import { getManifestForAgent, CURSOR_MANIFEST } from '../services/agentStatus/manifests';
 import { detectAgentComposer, detectAgentFromScreen, screenShowsQueuedMessage } from '../services/agents/agentScreenSignature';
 import { agentTranscripts, type TranscriptLocator } from '../services/agentTranscript';
 import {
@@ -1216,6 +1216,15 @@ export function registerRunpaneHandlers(
       }
       if (normalized.source === 'user') getMobilePushSender(configManager).arm(panel.id);
 
+      const blocked = (message: string): RunpanePanelSubmitResult => ({
+        ok: false, panelId: panel.id, paneId: panel.sessionId, inputBytes: 0,
+        enter: 'cr', sequenceName: 'enter-cr', verifiedSubmitted: false,
+        sentAt: new Date().toISOString(),
+        blocked: { kind: 'agent-prompt', message, suggestedCommand: panelScreenCommand(panel.id) },
+        nextCommand: panelScreenCommand(panel.id),
+      });
+      if (normalized.interrupt && !normalized.input.trim()) return blocked('An interrupt submission needs replacement text; no input was sent.');
+
       let beforeScreen = await buildPanelScreenResult(panel, DEFAULT_PANEL_SCREEN_LIMIT);
       const promptFile = normalized.asFilePointer
         ? await writePromptFile(panel.sessionId, stripTrailingNewlines(normalizePromptNewlines(normalized.input)))
@@ -1226,6 +1235,46 @@ export function registerRunpaneHandlers(
       // A CR inside the text would be Enter to an agent composer.
       const stagedInput = stripTrailingNewlines(normalizePromptNewlines(submittedText));
       const agentType = screenAgentType(beforeScreen);
+      if (normalized.interrupt) {
+        const ready = (screen: RunpanePanelScreenResult): boolean =>
+          screenAgentType(screen) === agentType && screen.state.activityStatus === 'idle' &&
+          (agentType === 'cursor'
+            ? detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleIdle === true &&
+              /^\s*→\s+(?:Add a follow-up|Plan, search, build anything)\s*$/imu.test(screen.text)
+            : screen.composer.isPresent && !screen.composer.hasUndeliveredText);
+        if (agentType !== 'codex' && agentType !== 'claude' && agentType !== 'cursor') {
+          return blocked('Pane cannot safely interrupt this agent: composer readiness is not supported. No input was sent.');
+        }
+        if (beforeScreen.composer.hasUndeliveredText) {
+          return blocked('The composer already contains text. Resolve it before using --interrupt; no input was sent.');
+        }
+        if (beforeScreen.state.activityStatus === 'active') {
+          terminalPanelManager.writeToTerminal(panel.id, agentType === 'cursor' ? '\x03' : '\x1b');
+          // Activity stays working for 10 seconds after the final interrupt redraw.
+          beforeScreen = await waitForPanelScreen(panel, ready, DEFAULT_PANEL_WAIT_TIMEOUT_MS);
+        }
+        if (!ready(beforeScreen)) {
+          return blocked('The agent did not reach an empty idle composer. The replacement text was not sent; inspect the screen before retrying.');
+        }
+        if (agentType === 'cursor') {
+          const generation = terminalPanelManager.getOutputGeneration(panel.id);
+          const input = ensureSubmitEnter(stagedInput);
+          terminalPanelManager.writeToTerminal(panel.id, input);
+          const screen = await waitForPanelScreen(panel, current =>
+            panelHasFreshOutputSince(panel.id, generation) &&
+            detectAgentState(CURSOR_MANIFEST, { screen: current.text, oscTitle: '', oscProgress: '' }).visibleWorking === true,
+          );
+          const taken = panelHasFreshOutputSince(panel.id, generation) &&
+            detectAgentState(CURSOR_MANIFEST, { screen: screen.text, oscTitle: '', oscProgress: '' }).visibleWorking === true;
+          return {
+            ...blocked('Pane sent the replacement, but could not verify that Cursor started it. Inspect the screen before retrying.'),
+            ok: taken, verifiedSubmitted: taken, inputBytes: Buffer.byteLength(input, 'utf8'),
+            delivery: { state: taken ? 'taken' : 'unknown', evidence: 'screen' },
+            blocked: taken ? undefined : { kind: 'submission_unverified', message: 'Pane sent the replacement but could not verify that Cursor started it. Inspect the screen before retrying.' },
+            promptFile,
+          };
+        }
+      }
       const warnings = agentType === 'claude' ? claudePromptWarnings(stagedInput) : undefined;
       // Claude reads text and Enter arriving in one read as a paste and keeps
       // the Enter as a newline. Terminal readiness can precede Claude drawing
@@ -1247,12 +1296,12 @@ export function registerRunpaneHandlers(
         // Claude takes a separately written Enter while it works (it queues
         // the message), so staging never waits for it to be idle.
         const staged = await stageComposerText(panel, agentType, stagedInput);
-        const submission = await submitComposerForPanel(panel, 'auto', {
+        const submission = await submitComposerForPanel(panel, normalized.interrupt ? 'enter' : 'auto', {
           cwd: sessionManager.getSession(panel.sessionId)?.worktreePath,
           text: stagedInput,
         });
         return {
-          ok: submission.ok,
+          ok: normalized.interrupt ? submission.delivery?.state === 'taken' : submission.ok,
           panelId: panel.id,
           paneId: panel.sessionId,
           inputBytes: staged.inputBytes + submission.inputBytes,
@@ -2830,7 +2879,9 @@ async function verifyComposerSubmitted(
     verification: 'observed',
     latestScreen,
     stagedTextVisible: false,
-    delivery,
+    delivery: delivery.state === 'queued'
+      ? { ...delivery, message: 'The agent sees this only after its current turn ends. Do not resend.' }
+      : delivery,
   });
 
   while (!clearedOnScreen && Date.now() - startedAt <= DEFAULT_COMPOSER_VERIFY_TIMEOUT_MS) {
@@ -3858,6 +3909,7 @@ function parsePanelSubmitRequest(value: PaneCommandValue): RunpanePanelSubmitReq
   return {
     panelId,
     input,
+    interrupt: optionalBoolean(value.interrupt),
     asFilePointer: optionalBoolean(value.asFilePointer),
     source: value.source === 'user' || value.source === 'agent' ? value.source : undefined,
   };
