@@ -991,7 +991,7 @@ const promptWarningsSchema = boundary.optional(boundary.array(boundary.object({
   code: boundary.enumeration('leading-bang-runs-shell', 'leading-hash-memory', 'leading-slash-command', 'leading-at-mention'),
   message: boundary.string,
 })));
-export const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.object({
+const initialInputSchema: BoundarySchema<InitialInputDeliveryResult> = boundary.object({
   delivered: boundary.boolean,
   submitted: boundary.boolean,
   inputBytes: boundary.number,
@@ -1089,7 +1089,7 @@ const panelSummarySchema: BoundarySchema<PanelSummary> = boundary.object({
   report: boundary.optional(agentReportSchema),
 });
 
-const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
+export const repoListResultSchema: BoundarySchema<RepoListResult> = boundary.object({
   ok: boundary.literal(true),
   repos: boundary.array(repoSummarySchema),
 });

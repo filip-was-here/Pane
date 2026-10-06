@@ -221,7 +221,9 @@ runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md --p
 note or creating a Pane. These checks also run before `--push` changes sender work.
 
 From WSL, when no local Linux daemon exists, handoff can use the Windows host's
-Pane through its enabled workspaces connection. Select a Windows-native saved
+Pane through its enabled workspaces connection (Windows Tailscale and Pane
+workspaces must be reachable). Repository listing and Pane creation use the
+reached daemon directly, so the host needs no global CLI installation. Select a Windows-native saved
 repository with `--repo`. Saved WSL repositories are rejected before sending.
 An explicit `--pane-dir` or `PANE_DIR` keeps that instance selected instead of
 falling back to a different host instance.
