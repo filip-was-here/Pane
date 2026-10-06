@@ -2203,7 +2203,7 @@ export const RUNPANE_CONTRACT = {
         "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
-        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
+        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence. If the message says the cursor was superseded, keep the replacement monitor and do not re-arm the old one."
       ],
       "panes create": [
         "Usage:",
@@ -3090,7 +3090,7 @@ export const RUNPANE_CONTRACT = {
         "  --effort <level>                minimal, low, medium, high, xhigh, or max; supported for Claude and Codex only; overrides the text. Cursor effort is rejected.",
         "  --repo <selector>               Saved repository on the destination; defaults to the one with the same remote.",
         "  --push                          Commit uncommitted work (not the note) as WIP and push the branch first (never forces).",
-        "  --dry-run                       Print what the destination resolved to, the note check, and git state; send nothing.",
+        "  --dry-run                       Check destination reachability, saved repo and OS; print note and git state; send nothing.",
         "  --json                          Print machine-readable output.",
         "",
         "Examples:",
@@ -3394,7 +3394,7 @@ export const RUNPANE_CONTRACT = {
         "Session orchestrator: runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff",
         "Pane Chat arms those flags itself through its skill; pass them only for your own scripts.",
         "STUCK means real unsubmitted composer text; an agent prompt suggestion never counts.",
-        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence."
+        "Dead watch: HEARTBEAT is proof of life only (--quiet drops it). Judge death by a non-zero exit or a WATCH ERROR line, not by silence. If the message says the cursor was superseded, keep the replacement monitor and do not re-arm the old one."
       ],
       "panes create": [
         "Usage:",
@@ -4350,6 +4350,7 @@ export const RUNPANE_CONTRACT = {
       "If composer submission cannot be verified without risking a duplicate, the create item is unsuccessful with `initialInput.staged`, `initialInput.attempts`, `initialInput.blocked.kind: submission_unverified`, and an actionable `nextCommand`. The CLI-facing `--prompt` alias maps to this canonical `initialInput` result.",
       "When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.",
       "`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. For Session members with an open PR, the daemon polls GitHub about every 3 minutes and reports `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`), `pr.checks` (`... CHECKS PASSED` or `... CHECKS FAILED <names>`), and `pr.merged` (`... MERGED`) on transitions only; list them in `--kinds`. In JSON, an entry with `replay: true` restates current state after a reset and is never READY.",
+      "A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.",
       "`sessions list` list durable named orchestration Sessions.",
       "`sessions create` create a durable named orchestration Session and its hidden terminal owner.",
       "`sessions get` read one durable named orchestration Session.",
@@ -12000,7 +12001,7 @@ export const RUNPANE_CONTRACT = {
           "User-present profile (a person is waiting on the result): the same command with --settle 60000 --blocked-settle 15000 --min-interval 120000 and no --idle-backoff. READY arrives within about 3 minutes of the turn ending.",
           "BUSY carries no action; drop it with --kinds. HEARTBEAT is client-side proof of life and is never shaped by cadence flags; pass --quiet for any monitor that wakes an agent.",
           "STUCK means real unsubmitted composer text. An agent prompt suggestion (for example a grey Try \"...\" hint) never counts.",
-          "Dead watch: judge death by a non-zero exit or a WATCH ERROR line, not by silence. Re-arm once; if it dies again, file runpane doctor --report.",
+          "Dead watch: judge death by a non-zero exit or a WATCH ERROR line, not by silence. If the message says the cursor was superseded, keep the replacement monitor and do not re-arm the old one. Otherwise re-arm once; if it dies again, file runpane doctor --report. Stop the previous monitor before switching profiles.",
           "Cadence state is held per named consumer; an anonymous --follow with a cadence flag names itself follow-<pid>. Held lines survive a reconnect of the same consumer; a changed filter re-delivers them under the new filter.",
           "Journal loss is surfaced through reset and dropped metadata.",
           "The daemon treats omitted idleAfterMs as disabled so older clients never receive agent.idle unexpectedly.",
@@ -13674,7 +13675,7 @@ export const RUNPANE_CONTRACT = {
           {
             "name": "--dry-run",
             "required": false,
-            "description": "Print the resolved destination, the note check, and git state, and send nothing."
+            "description": "Check destination daemon reachability and resolve its saved repository name, path, environment and OS; print the note check and git state without committing, pushing, fetching, writing notes or creating a Pane."
           },
           {
             "name": "--json",
@@ -13689,7 +13690,9 @@ export const RUNPANE_CONTRACT = {
           "runpane handoff --machine build-server --agent cursor --note-file ~/handoff.md"
         ],
         "notes": [
-          "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with the repository saved, and its own runpane on PATH (otherwise npx runpane@latest is used).",
+          "Another machine is reached through runpane workspace (Tailscale); it needs Pane running there with workspaces enabled and the repository saved. Repository listing and Pane creation call the reached daemon directly; no global destination CLI installation is required.",
+          "Destination preflight runs before sender commit/push. Inside WSL, an absent or refused local Linux daemon can fall back to its Windows host through reachable Windows Tailscale and enabled workspaces; explicit Pane directory selection keeps its instance. Select a native Windows saved repository; WSL saved repositories are rejected before sending.",
+          "A successful handoff requires initialInput.verifiedSubmitted and delivery taken or queued without blocked/error evidence. Unverified delivery exits nonzero with the created Pane, panel and a panels screen inspection command; inspect before retrying.",
           "Write the note for a reader with no context: quote errors and commands exactly, and record approaches that failed so they are not retried. Leave the front matter to the CLI.",
           "Model and effort become agent flags: claude --model/--effort, codex -m and -c model_reasoning_effort, cursor-agent --model. Cursor effort is not supported and is rejected before side effects.",
           "Run it from the checkout being handed off. The receiver works in a new Pane on the destination and pushes back to your branch, so stop changing that branch yourself."
