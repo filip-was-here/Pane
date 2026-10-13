@@ -8,6 +8,7 @@ import {
   type BoundarySchema,
 } from '../../../shared/validation/boundaryDecoder';
 import {
+  LEGACY_ORCHESTRATION_SESSION_ID,
   MAX_ORCHESTRATION_ACTIVITY,
   MAX_ORCHESTRATION_ITEMS,
   MAX_ORCHESTRATION_TEXT_LENGTH,
@@ -19,9 +20,10 @@ import {
   type OrchestrationSessionRecord,
   type OrchestrationSessionStoreData,
 } from '../../../shared/types/orchestrationSession';
+import { getPaneChatPanelId } from '../../../shared/types/paneChat';
 import type { JsonValue } from '../../../shared/validation/boundaryDecoder';
 
-const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor');
+const paneChatAgentSchema = boundary.enumeration('claude', 'codex', 'cursor', 'opencode');
 const MAX_STORE_BYTES = 2_000_000;
 const sourceSchema = boundary.enumeration('user', 'agent', 'system');
 const activityKindSchema = boundary.enumeration(
@@ -69,7 +71,7 @@ const activitySchema: BoundarySchema<OrchestrationActivity> = boundary.object({
   panelId: boundary.optional(boundary.nonEmptyString),
 });
 
-const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.object({
+const sessionSchema = boundary.object({
   runtime: boundary.optional(boundary.enumeration('windows', 'wsl')),
   wslDistribution: boundary.optional(boundary.nonEmptyString),
   promotedFrom: boundary.optional(boundary.object({ paneId: boundary.nonEmptyString, panelId: boundary.nonEmptyString })),
@@ -87,6 +89,7 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
     claude: boundary.nonEmptyString,
     codex: boundary.nonEmptyString,
     cursor: boundary.nonEmptyString,
+    opencode: boundary.optional(boundary.nonEmptyString),
   }),
   goal: boundary.string,
   context: boundary.string,
@@ -105,7 +108,7 @@ const sessionSchema: BoundarySchema<OrchestrationSessionRecord> = boundary.objec
   updatedAt: boundary.nonEmptyString,
 });
 
-const storeSchema: BoundarySchema<OrchestrationSessionStoreData> = boundary.object({
+const storeSchema = boundary.object({
   version: boundary.literal(ORCHESTRATION_SESSION_STORE_VERSION),
   selectedSessionId: boundary.optional(boundary.nonEmptyString),
   sessions: boundary.array(sessionSchema),
@@ -176,11 +179,22 @@ export class OrchestrationSessionStore {
 
 function validateStore(value: JsonValue | OrchestrationSessionStoreData): OrchestrationSessionStoreData {
   const decoded = decodeBoundary(value, storeSchema);
+  const normalized: OrchestrationSessionStoreData = {
+    ...decoded,
+    sessions: decoded.sessions.map(session => ({
+      ...session,
+      panelIds: {
+        ...session.panelIds,
+        opencode: session.panelIds.opencode ?? (session.id === LEGACY_ORCHESTRATION_SESSION_ID
+          ? getPaneChatPanelId('opencode') : `__orchestration_panel_${session.id}_opencode`),
+      },
+    })),
+  };
   if (decoded.sessions.length > MAX_ORCHESTRATION_ITEMS) {
     throw new Error(`orchestration Session store contains more than ${MAX_ORCHESTRATION_ITEMS} Sessions`);
   }
   const ids = new Set<string>();
-  for (const session of decoded.sessions) {
+  for (const session of normalized.sessions) {
     // Additive v1 migration: old snapshots keep their host launch behavior.
     session.runtime ??= 'windows';
     validateSession(session);
@@ -190,7 +204,7 @@ function validateStore(value: JsonValue | OrchestrationSessionStoreData): Orches
   if (decoded.selectedSessionId && !ids.has(decoded.selectedSessionId)) {
     throw new Error(`orchestration Session store selects missing Session ${decoded.selectedSessionId}`);
   }
-  return decoded;
+  return normalized;
 }
 
 function validateSession(session: OrchestrationSessionRecord): void {
@@ -199,7 +213,11 @@ function validateSession(session: OrchestrationSessionRecord): void {
   validateText(session.id, `Session ${session.id} id`);
   validateText(session.name, `Session ${session.id} name`);
   validateText(session.internalSessionId, `Session ${session.id} internal id`);
-  Object.values(session.panelIds).forEach(panelId => validateText(panelId, `Session ${session.id} panel id`));
+  for (const [agent, panelId] of Object.entries(session.panelIds)) {
+    // The validated Session id bounds this exact derived mapping, including its fixed overhead.
+    if (agent === 'opencode' && panelId === `__orchestration_panel_${session.id}_opencode`) continue;
+    validateText(panelId, `Session ${session.id} panel id`);
+  }
   if (!Number.isInteger(session.revision) || session.revision < 0) {
     throw new Error(`Session ${session.id} has an invalid revision`);
   }
