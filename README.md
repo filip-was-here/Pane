@@ -208,7 +208,7 @@ The CLI setup command prints the same connection code and, for SSH mode, the for
 
 For agents reaching your own machines from the CLI, see [Pane Workspaces](#pane-workspaces) below.
 
-Integration keys (voice dictation, iPhone notifications) set on one host reach your other hosts through the devices you paired. See [Shared integration keys](docs/SHARED_CREDENTIALS.md).
+Integration keys (voice dictation, iPhone notifications) set on one host reach your other hosts through your devices that have them saved. See [Shared integration keys](docs/SHARED_CREDENTIALS.md).
 
 ---
 
@@ -235,7 +235,9 @@ See [Workspaces setup, trust, and troubleshooting](docs/RUNPANE_WORKSPACES.md) f
 
 “Continue this on my Windows machine with Codex.” `runpane handoff` starts a fresh agent in a new Pane on the other machine (or a new tab in your Pane on this one), using your pushed branch and a note about the task. The note carries the goal, decisions, verified state, and next steps. Live processes and agent session memory stay on the original machine.
 
-Run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
+To move a whole Session instead, right-click it and choose **Move to host…**: its agent hands it off, and a Session with the same name, goal and agent appears on the other machine, ready to read the note. See [Move a Session to another machine](docs/SESSIONS.md#move-a-session-to-another-machine).
+
+To hand off a Pane's task, run from the repository you're handing off. On the destination, clone the same GitHub repository if needed and add that checkout to Pane. Install and sign in to the receiving agent there. Keep Pane running there. Use the npm CLI. On the destination, choose a repository outside WSL; WSL receivers are not supported.
 
 From a Bash or Zsh terminal (for example, on your Mac):
 
