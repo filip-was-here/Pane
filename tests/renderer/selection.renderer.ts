@@ -31,7 +31,7 @@ test('OpenCode creation sends the API payload and keeps the named Session agent 
   await dialog.getByRole('button', { name: 'Create Session', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   const creation = await page.evaluate(() => window.selectionTest.transportCalls().filter(call => call.method === 'orchestrationSessions.create'));
-  expect(creation).toEqual([{ method: 'orchestrationSessions.create', payload: { name: 'OpenCode review', agent: 'opencode', goal: undefined, launchCommand: '', profile: DEFAULT_SESSION_PROFILE, customResume: null, runtime: 'windows', wslDistribution: undefined, isPinned: false, nameFromFirstMessage: false }, data: expect.objectContaining({ session: expect.objectContaining({ id: 'created', name: 'OpenCode review', agent: 'opencode' }), agent: 'opencode', panel: expect.objectContaining({ id: 'opencode-created' }) }) }]);
+  expect(creation).toEqual([{ method: 'orchestrationSessions.create', payload: { name: 'OpenCode review', agent: 'opencode', goal: undefined, launchCommand: '', profile: DEFAULT_SESSION_PROFILE, customResume: null, runtime: undefined, wslDistribution: undefined, isPinned: false, nameFromFirstMessage: false }, data: expect.objectContaining({ session: expect.objectContaining({ id: 'created', name: 'OpenCode review', agent: 'opencode' }), agent: 'opencode', panel: expect.objectContaining({ id: 'opencode-created' }) }) }]);
   await resolve(page, 'get', 'created');
   await expect(page.locator('[data-session-content-id="created"]')).toBeVisible();
   await resolve(page, 'panels', 'internal-created');
