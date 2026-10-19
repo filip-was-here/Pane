@@ -96,6 +96,8 @@ describe.each([
       baseUrl,
     });
     clients.push(client);
+    await client.connect();
+    if (client instanceof RemoteDaemonBrowserClient) await vi.waitFor(() => expect(client.getState().status).toBe('connected'));
     return { client, requests, handlers, errors, server, baseUrl, getEventResponse: () => eventResponse };
   }
 
@@ -251,9 +253,9 @@ describe.each([
     const message = _name === 'browser'
       ? 'The remote action may have completed, but its result could not be confirmed. Check the current state before trying again. (Input failed)'
       : 'Input failed';
-    expect(await completed).toEqual([
-      { status: 'rejected', reason: new Error(message) },
-      { status: 'rejected', reason: new Error(message) },
+    expect(await completed).toMatchObject([
+      { status: 'rejected', reason: { message } },
+      { status: 'rejected', reason: { message: expect.stringContaining('queued terminal input was not sent') } },
     ]);
     expect(requests).toHaveLength(1);
   });
@@ -285,7 +287,6 @@ describe.each([
 
   it('discards queued input when the remote event connection is lost', async () => {
     const { client, requests, getEventResponse } = await setup();
-    await client.connect();
     await vi.waitFor(() => expect(getEventResponse()).toBeDefined());
     const completed = Promise.allSettled([
       client.invoke('terminal:input', ['panel-1', 'a']),

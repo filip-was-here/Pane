@@ -58,6 +58,7 @@ import { boundary, decodeBoundary } from '../../../shared/validation/boundaryDec
 import { OrchestrationSessionStore } from './orchestrationSessionStore';
 import type { WorkspaceSessionMembership } from './workspaceJournal';
 import { readPanelAgentReport } from './agentReport';
+import { paneChatFirstPrompt } from './paneChatMigrateOffer';
 import { applyTerminalInput, sessionNameFromMessage } from './sessionAutoName';
 import { PaneError, reasonOf } from '../../../shared/paneError';
 import { moveWithinOwnPlaces } from '../../../shared/utils/sessionOrder';
@@ -1002,7 +1003,7 @@ export class OrchestrationSessionManager extends EventEmitter {
     return {
       initialCommand,
       customResume: record.customResume,
-      initialInput: undefined,
+      initialInput: this.firstPrompt(record),
       initialInputMode: 'argument',
       initialInputSubmitStrategy: 'enter',
       initialInputDeliveryVersion: ORCHESTRATION_BOOTSTRAP_VERSION,
@@ -1014,6 +1015,14 @@ export class OrchestrationSessionManager extends EventEmitter {
       isCliPanel: true,
       isCliReady: false,
     };
+  }
+
+  /** Only the built-in Pane Chat ever speaks first; see paneChatMigrateOffer. */
+  private firstPrompt(record: OrchestrationSessionRecord): string | undefined {
+    if (record.id !== LEGACY_ORCHESTRATION_SESSION_ID || record.customResume) return undefined;
+    // SAFETY: Session-owned terminal panels persist TerminalPanelState as their custom state.
+    const current = panelManager.getPanel(record.panelIds[record.agent])?.state.customState as TerminalPanelState | undefined;
+    return paneChatFirstPrompt(record.agent, current, this.skillCacheManager?.paneChatSkillsRoot);
   }
 
   private async ensureGuidePath(): Promise<string> {

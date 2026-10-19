@@ -267,6 +267,8 @@ Use it for the work that spans panes:
 Add this repo, create three worktree panes for the next features, start Codex in each one, and keep a separate review tab ready for every PR.
 ```
 
+Already working in other agent tools? Say "migrate to Pane" and Pane Chat finds your Claude Code, Codex, OpenCode, Cursor and Conductor sessions (or anything similar), opens each one in a Pane tab with its own agent's resume, and checks that it continues where it left off. On a fresh install with no repositories, Pane Chat offers this once by itself. See [Bring your existing sessions into Pane](docs/SESSIONS.md#bring-your-existing-sessions-into-pane).
+
 Pane Chat keeps the human discussion at the orchestrator level, captures work as tickets or briefs, then hands authorized implementation to Claude, Codex, Cursor, or OpenCode agents in Panes through RunPane.
 
 The prompt stays small because Pane ships its skills and installs them into the Pane data directory at startup, whenever the bundled copy has changed:
@@ -276,7 +278,7 @@ The prompt stays small because Pane ships its skills and installs them into the 
 - `skills/pane-chat/skills/`: the bundled skills, also installed in `.claude/skills/` and `.codex/skills/`
 - `.claude/agents/` and `.codex/agents/`: helper subagents (explorer, cold-reader, qa-and-verify, reviewer)
 
-The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and two Pane-specific skills, `runpane` and `pane-work`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
+The bundle lives in `main/src/services/paneChatBundle/`. It is built on Agent Farm's raw profile (`prepare-pr`, `create-ticket`, `tdd`, `quick-verify`, `babysit-pr`, `investigate`, and others), general primitives such as `orchestrate-sessions`, `verify-app`, `options`, and `brief`, and three Pane-specific skills, `runpane`, `pane-work`, and `migrate-to-pane`. Pane generates the `pane-orchestrator` entry point at install time. Nothing is downloaded at runtime.
 
 Pane Chat and named Sessions support Claude, Codex, Cursor, and OpenCode. Choose the agent when creating a Session, and set the default in AI & Agents settings. OpenCode reads the generated Session `AGENTS.md`; this does not install OpenCode skills or MCP configuration.
 

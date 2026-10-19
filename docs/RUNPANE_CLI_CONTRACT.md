@@ -114,11 +114,6 @@ runpane panes rename --pane <pane-id> --name issue-393 --yes --json
 runpane panels list --pane <pane-id> --json
 runpane panels output --panel <panel-id> --limit 200 --json
 printf 'Continue\n' | runpane panels input --panel <panel-id> --input-file - --yes --json
-runpane watch --self-test
-runpane watch --follow
-runpane watch --as <name> --until-event --quiet --json --kinds agent.report,agent.blocked,panel.exited,pane.gone
-runpane watch --follow --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
-runpane watch --session <id|name> --follow --quiet --json --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone,pane.associated,pane.detached,pr.conflicted,pr.checks,pr.merged --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff
 runpane sessions list [--json] [--pane-dir <path>]
 runpane sessions create --from-json <path|-> [--json] [--pane-dir <path>]
 runpane sessions get --session <id|name> [--json] [--pane-dir <path>]
@@ -145,6 +140,13 @@ runpane links create --pane <pane-id> --json
 runpane panes git-status --pane <pane-id> --json
 runpane help
 runpane <command> --help
+runpane watch --until-event
+runpane watch --follow
+runpane watch --session <id|name> --follow
+runpane watch --session <id|name> --follow --ready-settle 1m --blocked-settle 15s --min-interval 2m
+runpane pr watch [--pane <id>] --url <PR URL> [--head <full-sha>] [--json] [--pane-dir <path>]
+runpane pr unwatch [--pane <id>] --url <PR URL> [--json] [--pane-dir <path>]
+runpane pr list [--pane <id>] [--json] [--pane-dir <path>]
 ```
 
 `runpane` with no arguments and `runpane setup` open an interactive wizard when stdin and stdout are TTYs. The remote-host wizard asks only for a name, then runs interactive Tailscale setup with automatic port selection; explicit install daemon flags remain available for SSH and manual URLs. In non-interactive shells or CI, both forms must print help, common commands, and agent discovery hints, then exit successfully instead of waiting for input.
@@ -157,7 +159,7 @@ runpane <command> --help
 
 The wrapper must stream Pane stdout/stderr without reformatting because `pane --remote-setup` prints the one-time `pane-remote://...` connection code.
 
-`runpane update` uses the same release resolution and installer path as `install client`.
+`runpane update` defaults to both app and active supported CLI, with independent supervision, staging, durable status, and explicit restoration outcomes. Prerequisites, status fields/exit codes, draft handling and manual recovery are documented in [Update recovery](UPDATE_RECOVERY.md).
 
 `runpane version` prints only wrapper package metadata and does not contact, launch, or focus the Pane app or daemon.
 
@@ -207,7 +209,7 @@ If composer submission cannot be verified without risking a duplicate, the creat
 
 When running from WSL while Pane is installed on Windows, the Linux wrapper may look for a missing `/tmp/pane-daemon.../daemon.sock` or resolve to a Windows shim such as Volta. In that case invoke the Windows wrapper through PowerShell from a Windows cwd, for example `powershell.exe -NoProfile -Command 'Set-Location $env:TEMP; runpane repos list --json'`.
 
-`runpane watch` waits for workspace transitions from the daemon journal without polling. `--follow` keeps waiting and prints one line per event: READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, plus HEARTBEAT every 60 seconds as proof of life. Defaults are responsive: no settle, no batching, all kinds, IDLE every `--idle-after`. Expensive consumers opt into `--kinds` (drop `agent.busy`; BUSY carries no action), `--settle <ms>` (READY only after a quiet window; a BUSY inside it cancels the line), `--blocked-settle <ms>`, `--min-interval <ms>` (batch non-urgent lines; BLOCKED bypasses it), and `--idle-backoff` (10m, 30m, 1h, 3h, then daily). Two profiles cover orchestrators. Unattended: `runpane watch --follow --quiet --kinds agent.ready,agent.blocked,agent.idle,panel.exited,pane.gone --settle 180000 --blocked-settle 30000 --min-interval 600000 --idle-backoff`, which budgets about 6 wake-ups per active pane per hour worst case, usually 1-3, and can deliver READY up to about 13 minutes late. User present: the same kinds with `--settle 60000 --blocked-settle 15000 --min-interval 120000` and no `--idle-backoff`, so READY arrives within about 3 minutes. Pane Chat arms it automatically through its skill; only your own scripts need the flags. STUCK means real unsubmitted composer text, never an agent prompt suggestion. `--quiet` (alias `--no-control-lines`) drops the WATCH OK, HEARTBEAT, and WATCH RECONNECTED control lines (`_ok`, `_heartbeat`, `_reconnected` in JSON); WATCH ERROR, RESET, and DROPPED (`_error`, `_reset`, `_dropped`) always print. Judge a dead watch by a non-zero exit or a WATCH ERROR line, not by silence. `--session <id|name>` follows every Pane associated with a named Session and re-reads membership on every read, so associate and detach need no re-arm; JOINED and LEFT (`pane.associated`, `pane.detached`) report membership changes. For Session members with an open PR, the daemon polls GitHub about every 3 minutes and reports `pr.conflicted` (`PR <pane-name> pane <pane-id> #<number> CONFLICTED`), `pr.checks` (`... CHECKS PASSED` or `... CHECKS FAILED <names>`), and `pr.merged` (`... MERGED`) on transitions only; list them in `--kinds`. In JSON, an entry with `replay: true` restates current state after a reset and is never READY. `--until-event` waits across daemon calls for the first matching event, prints it, and exits 0, so a harness that wakes an agent when a process exits (Claude Code background Bash, Codex) can wait with `runpane watch --as <name> --until-event --quiet --json --kinds agent.report,agent.blocked,panel.exited,pane.gone` and run it again after each event; the caller's own panel and a RESET never end the wait, and `--timeout-ms` becomes the total deadline (exit 124, `WATCH TIMEOUT`). Never pipe `--follow` into `grep -m1` or `head` to wait: `--follow` never exits on its own. `--follow` and `--until-event` imply `--agents-only`, except for `agent.report`, which arrives from any panel.
+`runpane watch` waits for agent, Pane, panel, and PR events from the daemon journal without polling. `--follow` keeps watching with defaults tuned for an agent watching unattended (quiet, batched, and it ends itself after 3 hours with nothing happening); individual duration flags override these defaults. Cadence requires a named follow consumer; `--follow --since <generation>` has no consumer name and bypasses settling and batching. `--until-event` waits for one event worth waking for, prints it immediately without follow settling or batching, and exits 0. The defaults are listed in the contract under defaults.watch.
 
 A watch releases its pending slot when its client socket or named pipe disconnects. Re-arming the same named cursor takes over the previous request; the superseded watcher exits with a WATCH ERROR instead of competing for the cursor. Anonymous concurrent watchers retain the eight-wait limit. Each request also has a 125-second lease (slightly longer than the maximum 120-second long poll), so an abandoned request is reclaimed even if no disconnect arrives.
 
@@ -247,6 +249,12 @@ Commands with a contract `daemonAction` (the `panes` git, script, restore, and m
 
 `runpane handoff` hands a task to a fresh agent on this or another of your machines. The sending agent writes the note from `runpane handoff --template` (goal, current state, done and verified, in progress, next steps, decisions and constraints, open questions, how to verify, git state); `runpane handoff "claude opus on parsas-macbook-pro" --note-file ~/handoff.md` checks every section is filled in, requires the branch to be pushed (or pushes it with `--push`, never forcing), writes the note to that machine's `~/.pane/handoffs/` and starts the agent in a new Pane branched from the sender's branch. From a Session's terminal it skips git and creates a Session with the same name, goal and agent on the other machine instead. The receiver reports back to the sender's panel.
 
+`runpane pr watch`: Register durable GitHub PR monitoring for a Pane.
+
+`runpane pr unwatch`: Remove a Pane’s explicit PR registration.
+
+`runpane pr list`: List PR registrations and stopped watches.
+
 ## Command reference
 
 Every command and its options, from `commands` in `contracts/runpane/contract.json`.
@@ -254,7 +262,7 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `help`: Show help for runpane or a specific command.
 - `setup`: Open the guided setup wizard for install, remote host setup, update, and diagnostics.
 - `install`: Install Pane on this machine or configure this machine as a remote daemon host.
-- `update`: Update the Pane desktop app using the same artifact path as install client.
+- `update`: Update both Pane and the invoked supported CLI through an independent helper.
 - `version`: Print the runpane wrapper version without contacting, launching, or focusing Pane.
 - `doctor`: Run platform, release, installed Pane, daemon reachability, and remote setup diagnostics.
 - `daemon repair`: Repair and restart the managed remote-daemon launcher without changing pairing or tunnel configuration.
@@ -329,12 +337,16 @@ Every command and its options, from `commands` in `contracts/runpane/contract.js
 - `lock list`: List held named locks, optionally only one Session's.
 - `sessions unpin`: Declaratively unpin a named Session using the UI pin state; repeated requests keep the requested state.
 - `sessions pin`: Declaratively pin a named Session using the UI pin state; repeated requests keep the requested state.
+- `pr watch`: Register durable GitHub PR monitoring for a Pane.
+- `pr unwatch`: Remove a Pane’s explicit PR registration.
+- `pr list`: List PR registrations and stopped watches.
 
 ```bash
 runpane help [command]
 runpane setup
 runpane install [client|daemon] [options]
-runpane update [options]
+  runpane update [--pane-only | --cli-only] [--version <latest|vX.Y.Z>] [--pane-dir <path>] [--dry-run] [--wait] [--json]
+  runpane update --status <operation-id> [--wait] [--pane-dir <path>] [--json]
 runpane version [--pane-dir <path>]
 runpane --version
 runpane doctor [--json] [--pane-dir <path>] [--pane-path <path>] [--format <format>] [--verbose]
@@ -357,7 +369,7 @@ runpane workspace [<machine>] write <path> [--json]
 runpane workspace <machine> exec [--cwd <path>] [--timeout-ms <ms>] [--json] -- <command>
 runpane handoff --template
 runpane handoff "<destination>" --note-file <path|-> [--machine <name>] [--agent <codex|claude|cursor>] [--model <model>] [--effort <level>] [--repo <selector>] [--push] [--dry-run] [--json]
-runpane watch [--as <name>|--since <generation>] [--follow|--until-event] [--format <lines|json>] [--heartbeat <seconds>] [--idle-after <ms>] [--settle <ms>] [--blocked-settle <ms>] [--min-interval <ms>] [--idle-backoff] [--all-managed|--pane <id>|--session <id|name>] [--include-shells] [--self-test] [--quiet] [--kinds <kind,...>] [--repo <selector>] [--name-contains <text>] [--timeout-ms <ms>] [--from <now|earliest>] [--json] [--pane-dir <path>]
+runpane watch [--follow|--until-event] [--session <id|name>|--pane <id>] [--json] [overrides]
 runpane panes create --repo <selector> --name <name> --agent <codex|claude|cursor> [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
 runpane panes create --repo <selector> --name <name> --tool-command <command> [--agent <codex|claude|cursor>] [--source user|agent] [--focus|--no-focus] [--base <ref>] [--branch <name>] [--prompt-file <path|->] [options] [--pane-dir <path>]
 runpane panes create --from-json <path|-> [--yes] [--json] [--pane-dir <path>]
@@ -421,6 +433,9 @@ runpane lock release --name <name> [--force] [--session <id|name>] [--note <text
 runpane lock list [--session <id|name>] [--json] [--pane-dir <path>]
 runpane sessions unpin --session <id|name> [--json] [--pane-dir <path>]
 runpane sessions pin --session <id|name> [--json] [--pane-dir <path>]
+runpane pr watch [--pane <id>] --url <PR URL> [--head <full-sha>] [--json] [--pane-dir <path>]
+runpane pr unwatch [--pane <id>] --url <PR URL> [--json] [--pane-dir <path>]
+runpane pr list [--pane <id>] [--json] [--pane-dir <path>]
 ```
 
 ## Agent Context
@@ -471,7 +486,7 @@ Brief tools:
 - `panels submit-composer`: Submit an agent composer with the key for its current state.
 - `panels wait`: Wait for terminal initialized, ready, idle, or text state with compact output.
 - `panels resume`: Restart a stopped terminal panel in place (same panel id), resuming its agent's conversation.
-- `watch`: Wait for workspace transitions (READY, BLOCKED, IDLE, STUCK, NEW, GONE, EXIT, STOPPED, JOINED, LEFT, PR) from the daemon journal without polling; responsive by default, with opt-in cadence flags for expensive consumers.
+- `watch`: Wait for workspace events from the durable daemon journal; follow uses conservative cadence and quiet expiry by default.
 
 Managed AGENTS.md block body:
 
@@ -544,12 +559,12 @@ These flags are consumed by local daemon-control commands:
 --kinds <kind,...>
 --name-contains <text>
 --exclude-pane <pane-id>
---format <lines|json>
---heartbeat <seconds>
---idle-after <milliseconds>
---settle <milliseconds>
---blocked-settle <milliseconds>
---min-interval <milliseconds>
+--heartbeat <duration>
+--idle-after <duration>
+--expire-after <duration>
+--ready-settle <duration>
+--blocked-settle <duration>
+--min-interval <duration>
 --body-file <path|->
 --session <id|name>
 --ttl <duration>
@@ -571,6 +586,7 @@ These flags are consumed by local daemon-control commands:
 --machine <name>
 --model <model>
 --effort <level>
+--epoch <epoch>
 --json
 --wait-ready
 --no-focus
@@ -589,14 +605,10 @@ These flags are consumed by local daemon-control commands:
 --until-event
 --ack-now
 --include-held-input
---agents-only
 --all-stopped
---all-managed
 --include-shells
 --no-held-input
 --self-test
---quiet (aliases: --no-control-lines)
---idle-backoff
 --report
 --read-only
 --template
