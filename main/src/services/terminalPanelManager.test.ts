@@ -1,18 +1,20 @@
 import * as claudeTranscripts from './claudeSessionTranscript';
+import * as pty from '@lydell/node-pty';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from './configManager';
-import { resetPaneRuntimeForTests, setPaneRuntime } from '../core/runtime';
+import { resetPaneRuntimeForTests, setPaneRuntime, type PtyHostRuntime } from '../core/runtime';
 import { createFanoutEventSink } from '../core/eventSink';
 import { createFlowControlRecord, disposeFlowControlRecord, type FlowControlRecord } from '../ptyHost/flowControl';
 import type { RemoteTerminalEmulator } from './terminalEmulatorClient';
 import { inProcessEmulatorHost } from '../test/inProcessEmulatorHost';
-import type { TerminalPanelState } from '../../../shared/types/panels';
+import type { TerminalPanelState, ToolPanel } from '../../../shared/types/panels';
 import { MISSION_CONTROL_VIEWER_PREFIX } from '../../../shared/types/missionControl';
 import * as openCodeLaunch from './agents/opencodeLaunch';
 
 import { TerminalPanelManager } from './terminalPanelManager';
 import { databaseService } from './database';
 import { ShellDetector } from '../utils/shellDetector';
+import * as shellPathUtils from '../utils/shellPath';
 import { panelManager } from '../test/setup';
 import { RunCommandManager } from './runCommandManager';
 import type { DatabaseService } from '../database/database';
@@ -1208,6 +1210,92 @@ describe('TerminalPanelManager hidden output delivery', () => {
       expect(result.commandToRun).toBe(`opencode --auto --session "${sessionId}"`);
       expect(result.customState.agentSessionId).toBe(sessionId);
       expect(result.customState.wasInterrupted).toBeUndefined();
+    }
+  });
+
+  it.each([undefined, 'session'])('resumes the exact recorded OpenCode update conversation without replaying input (Session=%s)', orchestrationSessionId => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', agentSessionId: 'ses_Saved123', updateResumeId: 'ses_Saved123',
+      orchestrationSessionId, preserveLaunchCommand: Boolean(orchestrationSessionId), wasInterrupted: true,
+      initialInput: 'Do not replay this prompt', initialInputFile: '/saved/prompt.txt', initialInputMode: 'argument',
+    };
+    const before = structuredClone(state);
+
+    const result = manager.resolveCliLaunchCommand('panel', 'opencode --auto', state);
+
+    expect(result.commandToRun).toBe('opencode --auto --session "ses_Saved123"');
+    expect(result.isCliCommand).toBe(true);
+    expect(result.customState.agentSessionId).toBe(state.updateResumeId);
+    expect(result.customState.initialInput).toBeUndefined();
+    expect(result.customState.initialInputFile).toBeUndefined();
+    expect(result.customState.updateResumeId).toBeUndefined();
+    expect(state).toEqual(before);
+  });
+
+  it('refuses an OpenCode selector that differs from the recorded update conversation', () => {
+    const manager = testAccess<LaunchCommandAccess>(new TerminalPanelManager());
+    const state: TerminalPanelState = {
+      agentType: 'opencode', agentSessionId: 'ses_Saved123', updateResumeId: 'ses_Saved12',
+      initialInput: 'Do not replay this prompt', initialInputFile: '/saved/prompt.txt',
+    };
+    const before = structuredClone(state);
+
+    expect(() => manager.resolveCliLaunchCommand('panel', 'opencode --auto', state)).toThrowError(expect.objectContaining({
+      code: 'ERR_UPDATE_CONVERSATION', message: expect.stringContaining('No command or input was sent'),
+    }));
+    expect(state).toEqual(before);
+  });
+
+  it.each([
+    { launchMode: 'wrapped' as const },
+    { customResume: { mode: 'generated' as const, initialTemplate: '{command} {sessionId}', resumeTemplate: '{command} {sessionId}' } },
+  ])('rejects incompatible OpenCode Session update launches before allocation/spawn: %j', async incompatibleState => {
+    const manager = new TerminalPanelManager(inProcessEmulatorHost);
+    const command = 'opencode --auto';
+    const state: TerminalPanelState = {
+      agentType: 'opencode', initialCommand: command, orchestrationSessionId: 'update-session',
+      preserveLaunchCommand: true, agentSessionId: 'ses_Saved123', updateResumeId: 'ses_Saved123',
+      customResumeStarted: true, wasInterrupted: true, ...incompatibleState,
+    };
+    const panel: ToolPanel = {
+      id: 'update-panel', sessionId: 'session', type: 'terminal', title: 'OpenCode',
+      state: { isActive: true, customState: state },
+      metadata: { createdAt: '2026-10-19T00:00:00.000Z', lastActiveAt: '2026-10-19T00:00:00.000Z', position: 0 },
+    };
+    const before = structuredClone(state);
+    const spawn = vi.fn(async () => { throw new Error('Unexpected PTY host spawn'); });
+    setPaneRuntime({
+      eventSink: { send: vi.fn() }, getWebviewContextMap: () => new Map(),
+      getConfigManager: () => partialMock<ConfigManager>({ getPreferredShell: () => 'sh', getUsePtyHost: () => true }),
+      getPtyHostRuntime: () => partialMock<PtyHostRuntime>({ spawn }),
+    });
+    vi.mocked(panelManager.getPanel).mockReturnValue(panel);
+    const warmup = vi.spyOn(shellPathUtils, 'warmShellPath').mockResolvedValue();
+    const shellPath = vi.spyOn(shellPathUtils, 'getShellPath').mockReturnValue(process.env.PATH ?? '');
+    const shell = vi.spyOn(ShellDetector, 'getDefaultShell').mockReturnValue({ path: '/bin/sh', name: 'sh', args: [] });
+    const allocate = vi.spyOn(openCodeLaunch, 'allocateOpenCodeSessionId');
+    const resolve = vi.spyOn(openCodeLaunch, 'resolveOpenCodeLaunchCommand');
+    const legacySpawn = vi.spyOn(pty, 'spawn').mockImplementation(() => { throw new Error('Unexpected legacy PTY spawn'); });
+    try {
+      const refusal = expect.objectContaining({ code: 'ERR_SESSION_OPENCODE_LAUNCH' });
+      expect(() => testAccess<LaunchCommandAccess>(manager).resolveCliLaunchCommand('update-panel', command, state))
+        .toThrowError(refusal);
+      await expect(manager.initializeTerminal(panel, process.cwd())).rejects.toThrowError(refusal);
+      expect(state).toEqual(before);
+      expect(allocate).not.toHaveBeenCalled();
+      expect(resolve).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(legacySpawn).not.toHaveBeenCalled();
+      expect(panelManager.updatePanel).not.toHaveBeenCalled();
+      expect(manager.getActiveTerminals()).toEqual([]);
+    } finally {
+      legacySpawn.mockRestore();
+      resolve.mockRestore();
+      allocate.mockRestore();
+      shell.mockRestore();
+      shellPath.mockRestore();
+      warmup.mockRestore();
     }
   });
 
